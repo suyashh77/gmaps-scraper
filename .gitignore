@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.db
+*.log
+machine_id.txt
+google_auth*.json
+pause.flag
+debug_*.png
+debug_*.html
+
+# Data files — too large for git
+Data/
+Archive/
+408 batches/
+Gmaps_Scraper_MacWindows/
+Step_1.4_EnrichOverture__Program/
+Auth/
+
+# Editor
+.vscode/
+.idea/
