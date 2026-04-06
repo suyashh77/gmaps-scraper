@@ -15,8 +15,7 @@ echo ""
 PYTHON=""
 for cmd in python3.12 python3.11 python3.10 python3.9 python3.8 python3 python; do
     if command -v "$cmd" &>/dev/null; then
-        version=$("$cmd" -c 'import sys; print(sys.version_info[:2])' 2>/dev/null || echo "")
-        if [[ "$version" > "(3, 7)" ]]; then
+        if "$cmd" -c 'import sys; assert sys.version_info >= (3, 8)' 2>/dev/null; then
             PYTHON="$cmd"
             break
         fi
