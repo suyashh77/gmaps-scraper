@@ -75,6 +75,17 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
     row = cur.fetchone()
     avg_reviews = row["avg_rev"] if row and row["avg_rev"] else 0
 
+    cur.execute("SELECT COALESCE(SUM(target_reviews),0) AS raw_tgt FROM stores WHERE target_reviews > 0")
+    raw_target = cur.fetchone()["raw_tgt"]
+
+    cur.execute("SELECT COALESCE(SUM(MIN(1500, target_reviews)),0) AS capped_tgt FROM stores WHERE target_reviews > 0")
+    capped_target = cur.fetchone()["capped_tgt"]
+
+    cur.execute("SELECT COALESCE(SUM(reviews_scraped),0) AS total_scraped FROM stores")
+    total_scraped = cur.fetchone()["total_scraped"]
+
+    reviews_remaining = capped_target - total_scraped
+
     cur.execute(
         "SELECT MIN(created_at) AS first_ts FROM stores"
     )
@@ -99,7 +110,7 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
     # Per-store detail
     cur.execute("""
         SELECT store_id, input_name, input_city, input_state,
-               status, reviews_scraped, gmaps_reviews_count,
+               status, reviews_scraped, target_reviews, gmaps_reviews_count,
                attempts, error_message, updated_at
         FROM stores
         ORDER BY store_id
@@ -167,6 +178,10 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
         ("REVIEWS", ""),
         ("Total Reviews Collected", f"{total_reviews:,}"),
         ("Avg Reviews / Store", f"{avg_reviews:.0f}"),
+        ("Raw Target Total", f"{raw_target:,}"),
+        ("Capped Target (@1500/store)", f"{capped_target:,}"),
+        ("Reviews Remaining (capped)", f"{reviews_remaining:,}"),
+        ("Completion % (vs capped)", f"{total_scraped / capped_target * 100:.1f}%" if capped_target else "0%"),
         ("", ""),
         ("TIMING", ""),
         ("Total Scraping Time", _fmt_duration(total_secs)),
@@ -186,7 +201,8 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
     ws2 = wb.create_sheet("Store Detail")
     headers = [
         "Store ID", "Name", "City", "State", "Status",
-        "Reviews Scraped", "Google Review Count", "Attempts",
+        "Reviews Scraped", "Target Reviews", "Capped Target",
+        "Remaining", "% Done", "Google Review Count", "Attempts",
         "Error", "Last Updated",
     ]
 
@@ -198,13 +214,22 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
         cell.border = thin_border
 
     for row_idx, store in enumerate(store_rows, start=2):
+        scraped = store["reviews_scraped"] or 0
+        tgt = store["target_reviews"] or 0
+        capped = min(1500, tgt) if tgt > 0 else 0
+        rem = max(capped - scraped, 0)
+        pct = scraped / capped if capped > 0 else 0
         values = [
             store["store_id"],
             _safe_cell(store["input_name"] or ""),
             _safe_cell(store["input_city"] or ""),
             _safe_cell(store["input_state"] or ""),
             store["status"] or "",
-            store["reviews_scraped"] or 0,
+            scraped,
+            tgt,
+            capped,
+            rem,
+            pct,
             store["gmaps_reviews_count"] or 0,
             store["attempts"] or 0,
             _safe_cell((store["error_message"] or "")[:80]),
@@ -221,6 +246,9 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
                     cell.fill = PatternFill(start_color="FFC7CE", fill_type="solid")
                 elif val == "pending":
                     cell.fill = PatternFill(start_color="FFEB9C", fill_type="solid")
+            # Format % Done
+            if col_idx == 10:
+                cell.number_format = "0.0%"
 
     # Auto-fit columns
     for col_idx in range(1, len(headers) + 1):

@@ -119,17 +119,19 @@ def run_single(
                 master_rev = int(store.get("master_reviews") or 0)
                 target_rev = int(store.get("target_reviews") or 0)
                 store_type = "INCOMPLETE" if master_rev > 0 else "FRESH"
-                effective = max(target_rev - master_rev, 1)
+                effective = max(min(1500, target_rev) - master_rev, 1)
+                # Scale timeout: ~1.5s per review needed, min 5 min, max 45 min
+                timeout_sec = max(300.0, min(effective * 1.5, 2700.0))
                 logger.info(
                     f"Scraping [{store_type}]: {store_name} "
-                    f"(target={target_rev}, master={master_rev}, need={effective})"
+                    f"(target={target_rev}, capped={min(1500, target_rev)}, master={master_rev}, "
+                    f"need={effective}, timeout={timeout_sec:.0f}s)"
                 )
 
                 try:
-                    # Hard 3-minute cap per store
                     status = await asyncio.wait_for(
                         scraper.scrape_single_store(store),
-                        timeout=180.0,
+                        timeout=timeout_sec,
                     )
                     processed += 1
                     if status in ("completed", "skipped"):
@@ -142,8 +144,8 @@ def run_single(
 
                 except asyncio.TimeoutError:
                     consecutive_crashes += 1
-                    logger.warning(f"'{store_name}' timed out after 3 min — skipping")
-                    db.mark_store_failed(store["store_id"], "Timeout: exceeded 3 minutes")
+                    logger.warning(f"'{store_name}' timed out after {timeout_sec:.0f}s — skipping")
+                    db.mark_store_failed(store["store_id"], f"Timeout: exceeded {timeout_sec:.0f}s")
                     processed += 1
                     # Force-kill browser — graceful close may hang after timeout
                     try:

@@ -691,8 +691,51 @@ class GoogleMapsScraper:
             except Exception:
                 continue
 
-        # Last resort: try scrolling down to find the reviews section on the overview
-        self.logger.error("Could not find Reviews tab with any selector")
+        # Recovery: we may be in compact/sidebar view — click the store name
+        # or review count link to force the full detail view with tabs
+        self.logger.warning("No Reviews tab found — attempting to expand to full detail view")
+        expand_selectors = [
+            # Click review count text (e.g. "8 reviews") to go directly to reviews
+            "button[aria-label*='review']",
+            "span[aria-label*='review']",
+            "a[aria-label*='review']",
+            # Click the store name header to expand panel
+            "h1.DUwDvf",
+            "h1.fontHeadlineLarge",
+            "h2.bwoZTb",
+            # Click the rating stars area
+            "div.F7nice",
+            "span.ceNzKf",
+        ]
+        for sel in expand_selectors:
+            try:
+                el = self.page.locator(sel).first
+                if await el.is_visible(timeout=1500):
+                    self.logger.info(f"Clicking '{sel}' to expand detail view")
+                    await el.click()
+                    await asyncio.sleep(random.uniform(2.0, 3.5))
+                    # Now retry finding the Reviews tab
+                    for tab_sel in tab_selectors:
+                        try:
+                            btn = self.page.locator(tab_sel).first
+                            if await btn.is_visible(timeout=2500):
+                                self.logger.info(f"Found Reviews tab after expand: {tab_sel}")
+                                await btn.click()
+                                try:
+                                    await self.page.wait_for_selector(
+                                        "div.jftiEf, div[data-review-id]",
+                                        timeout=10000,
+                                    )
+                                    self.logger.info("Reviews panel loaded after expand")
+                                    return True
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+
+        self.logger.error("Could not find Reviews tab — even after expand attempts")
 
         # Save debug info
         try:
@@ -958,68 +1001,98 @@ class GoogleMapsScraper:
         rl = self.config["rate_limiting"]
         last_log_count = 0
 
-        while total_collected < max_reviews and scroll_attempts < max_scrolls and not self._shutdown:
-            if await self.check_for_captcha():
-                # Flush buffer before breaking so no reviews are lost
-                if store_id and self.db and buffer:
-                    self.db.save_reviews_batch(store_id, buffer, machine_id=self.machine_id)
-                    self.db.update_store_reviews_count(store_id, total_collected)
-                    buffer = []
-                self.trigger_global_pause("CAPTCHA during review collection")
-                break
+        # Faster scrolling for large targets to stay within timeout
+        fast_mode = max_reviews > 300
+        scroll_delay_min = 0.6 if fast_mode else rl["min_scroll_delay"]
+        scroll_delay_max = 1.5 if fast_mode else rl["max_scroll_delay"]
+        if fast_mode:
+            self.logger.info(f"Fast-scroll mode enabled (target={max_reviews} > 300)")
 
-            # Find all review elements currently in the DOM
-            # Use only data-review-id — div.jftiEf can also match the outer
-            # container, causing duplicate extraction
-            visible = await self.page.locator("div[data-review-id]").all()
-            new_in_cycle = 0
-
-            for el in visible:
-                if total_collected >= max_reviews:
-                    break
-                rid = await el.get_attribute("data-review-id")
-                if not rid or rid in seen_ids:
-                    continue
-                seen_ids.add(rid)
-                record = await self._extract_review(el)
-                if not record:
-                    continue
-                new_in_cycle += 1
-                total_collected += 1
-                if store_id and self.db:
-                    buffer.append(record)
-                    if len(buffer) >= batch_size:
+        try:
+            while total_collected < max_reviews and scroll_attempts < max_scrolls and not self._shutdown:
+                if await self.check_for_captcha():
+                    # Flush buffer before breaking so no reviews are lost
+                    if store_id and self.db and buffer:
                         self.db.save_reviews_batch(store_id, buffer, machine_id=self.machine_id)
                         self.db.update_store_reviews_count(store_id, total_collected)
                         buffer = []
-                else:
-                    in_memory.append(record)
+                    self.trigger_global_pause("CAPTCHA during review collection")
+                    break
 
-            # Progress logging every 25 reviews
-            if total_collected - last_log_count >= 25:
-                self.logger.info(
-                    f"Progress: {total_collected}/{max_reviews} reviews collected "
-                    f"(scroll #{scroll_attempts}, {len(seen_ids)} seen)"
-                )
-                last_log_count = total_collected
+                # Find all review elements currently in the DOM
+                # Use only data-review-id — div.jftiEf can also match the outer
+                # container, causing duplicate extraction
+                visible = await self.page.locator("div[data-review-id]").all()
+                new_in_cycle = 0
 
-            stall_cycles = stall_cycles + 1 if new_in_cycle == 0 else 0
-            reached_end = False
-            if stall_cycles >= stall_threshold:
-                self.logger.info(f"Stall detected after {stall_cycles} cycles with no new reviews — end of reviews reached")
-                reached_end = True
-                break
+                for el in visible:
+                    if total_collected >= max_reviews:
+                        break
+                    rid = await el.get_attribute("data-review-id")
+                    if not rid or rid in seen_ids:
+                        continue
+                    seen_ids.add(rid)
+                    record = await self._extract_review(el)
+                    if not record:
+                        continue
+                    new_in_cycle += 1
+                    total_collected += 1
+                    if store_id and self.db:
+                        buffer.append(record)
+                        if len(buffer) >= batch_size:
+                            self.db.save_reviews_batch(store_id, buffer, machine_id=self.machine_id)
+                            self.db.update_store_reviews_count(store_id, total_collected)
+                            buffer = []
+                    else:
+                        in_memory.append(record)
 
-            # Scroll the reviews panel
-            scroll_delta = random.randint(1500, 4000)
-            await self._scroll_reviews_panel(delta=scroll_delta)
-            await asyncio.sleep(random.uniform(rl["min_scroll_delay"], rl["max_scroll_delay"]))
-            scroll_attempts += 1
+                # Progress logging every 25 reviews
+                if total_collected - last_log_count >= 25:
+                    self.logger.info(
+                        f"Progress: {total_collected}/{max_reviews} reviews collected "
+                        f"(scroll #{scroll_attempts}, {len(seen_ids)} seen)"
+                    )
+                    last_log_count = total_collected
 
-            # Periodic idle pauses
-            idle_every = int(rl.get("idle_pause_every_n_scrolls", 0))
-            if idle_every > 0 and scroll_attempts % idle_every == 0:
-                await asyncio.sleep(random.uniform(rl["idle_pause_min"], rl["idle_pause_max"]))
+                stall_cycles = stall_cycles + 1 if new_in_cycle == 0 else 0
+                reached_end = False
+                if stall_cycles >= stall_threshold:
+                    # Before giving up, try a recovery scroll: jump far down + wait
+                    # to let Google Maps lazy-load more reviews
+                    self.logger.info(f"Stall at {stall_cycles} cycles — attempting recovery scroll")
+                    await self._scroll_reviews_panel(delta=10000)
+                    await asyncio.sleep(random.uniform(4.0, 6.0))
+                    recovery_visible = await self.page.locator("div[data-review-id]").all()
+                    recovered = sum(1 for el in recovery_visible
+                                    if (await el.get_attribute("data-review-id")) not in seen_ids)
+                    if recovered > 0:
+                        self.logger.info(f"Recovery found {recovered} new reviews — continuing")
+                        stall_cycles = 0
+                        continue
+                    self.logger.info(f"Recovery failed — end of reviews reached ({total_collected} collected)")
+                    reached_end = True
+                    break
+
+                # Scroll the reviews panel
+                scroll_delta = random.randint(1500, 4000)
+                await self._scroll_reviews_panel(delta=scroll_delta)
+                await asyncio.sleep(random.uniform(scroll_delay_min, scroll_delay_max))
+                scroll_attempts += 1
+
+                # Periodic idle pauses
+                idle_every = int(rl.get("idle_pause_every_n_scrolls", 0))
+                if idle_every > 0 and scroll_attempts % idle_every == 0:
+                    await asyncio.sleep(random.uniform(rl["idle_pause_min"], rl["idle_pause_max"]))
+
+        except (asyncio.CancelledError, Exception) as exc:
+            # Flush buffer on timeout/cancellation so partial reviews are saved
+            if store_id and self.db and buffer:
+                self.logger.info(f"Flushing {len(buffer)} buffered reviews before exit")
+                self.db.save_reviews_batch(store_id, buffer, machine_id=self.machine_id)
+                self.db.update_store_reviews_count(store_id, total_collected)
+                buffer = []
+            if isinstance(exc, asyncio.CancelledError):
+                raise
 
         # Flush remaining buffer
         if store_id and self.db and buffer:
@@ -1121,7 +1194,8 @@ class GoogleMapsScraper:
     async def scrape_single_store(self, store: Any) -> str:
         store_id = store["store_id"]
         master_reviews = int(store.get("master_reviews") or 0)
-        target_reviews = int(store.get("target_reviews") or 1000)
+        raw_target = int(store.get("target_reviews") or 1000)
+        target_reviews = min(1500, raw_target)
         store_type = "incomplete" if master_reviews > 0 else "fresh"
 
         await self.wait_if_paused()
@@ -1134,8 +1208,8 @@ class GoogleMapsScraper:
         # Effective target: how many MORE reviews this machine needs to collect
         effective_target = max(target_reviews - master_reviews, 1)
         self.logger.info(
-            f"[{store_type.upper()}] target={target_reviews}, master={master_reviews}, "
-            f"effective_target={effective_target}"
+            f"[{store_type.upper()}] target={target_reviews} (raw={raw_target}, capped=1500), "
+            f"master={master_reviews}, effective_target={effective_target}"
         )
 
         try:
@@ -1159,11 +1233,13 @@ class GoogleMapsScraper:
                 self.db.update_store_live_review_count(store_id, live_count)
                 self.logger.info(f"Live Google review count: {live_count}")
 
-            # Use effective_target but cap at max_reviews_per_store and live count
-            scrape_target = min(
-                int(self.config["scraping"]["max_reviews_per_store"]),
-                max(live_count, effective_target),
-            )
+            # Scrape only what we actually need — don't over-scrape
+            scrape_target = effective_target
+            # If Google shows fewer reviews than we need, cap to avoid fruitless scrolling
+            if live_count > 0 and live_count < scrape_target:
+                self.logger.info(f"Live count ({live_count}) < effective target ({scrape_target}) — capping to live count")
+                scrape_target = live_count
+            scrape_target = min(scrape_target, int(self.config["scraping"]["max_reviews_per_store"]))
 
             # Alternate sort order: odd attempts → newest, even attempts → most relevant (oldest/mixed)
             attempt = int(store.get("attempts") or 1)
@@ -1175,23 +1251,34 @@ class GoogleMapsScraper:
                 final_count = self.db.get_review_count(store_id)
                 # Total reviews = what master has + what we collected locally
                 total_reviews = master_reviews + final_count
-                # Mark complete if total hits target OR we reached the end of reviews
-                if total_reviews >= target_reviews or reached_end:
+
+                # Mark complete if:
+                #   1. Total hits target, OR
+                #   2. We reached end of reviews (no more to scrape), OR
+                #   3. Google has fewer reviews than our target (live_count < target)
+                #      and we got most of them
+                is_done = (
+                    total_reviews >= target_reviews
+                    or reached_end
+                    or (live_count > 0 and live_count < target_reviews
+                        and total_reviews >= live_count - 1)
+                )
+                if is_done:
                     self.db.mark_store_completed(store_id, final_count)
                     self.logger.info(
                         f"Store completed [{store_type}]: {final_count} new + {master_reviews} master "
-                        f"= {total_reviews}/{target_reviews} (reached_end={reached_end})"
+                        f"= {total_reviews}/{target_reviews} (live={live_count}, reached_end={reached_end})"
                     )
                     return "completed"
                 else:
                     self.db.mark_store_failed(
                         store_id,
                         f"Incomplete [{store_type}]: {final_count} new + {master_reviews} master "
-                        f"= {total_reviews}/{target_reviews}, attempt {attempt}",
+                        f"= {total_reviews}/{target_reviews} (live={live_count}), attempt {attempt}",
                     )
                     self.logger.warning(
-                        f"Store incomplete [{store_type}]: {total_reviews}/{target_reviews}, "
-                        f"attempt {attempt}, will retry"
+                        f"Store incomplete [{store_type}]: {total_reviews}/{target_reviews} "
+                        f"(live={live_count}), attempt {attempt}, will retry"
                     )
                     return "failed"
             else:

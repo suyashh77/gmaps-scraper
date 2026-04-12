@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.db
+*.log
+scraper.log
+machine_id.txt
+google_auth*.json
+pause.flag
+debug_*.png
+debug_*.html
+*.xlsx
+*.csv
