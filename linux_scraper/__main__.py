@@ -104,13 +104,13 @@ def main() -> int:
 
     if args.command == "merge":
         from .merge_results import main as merge_main
-        # Re-parse with merge's own parser
-        sys.argv = ["merge"] + args.scraper_dbs
+        # Pass explicit argv to avoid mutating global sys.argv
+        merge_argv = list(args.scraper_dbs)
         if args.master != "Step_5_master_reviews.db":
-            sys.argv += ["--master", args.master]
+            merge_argv += ["--master", args.master]
         if args.dry_run:
-            sys.argv += ["--dry-run"]
-        merge_main()
+            merge_argv += ["--dry-run"]
+        merge_main(merge_argv)
         return 0
 
     if args.command == "stats":

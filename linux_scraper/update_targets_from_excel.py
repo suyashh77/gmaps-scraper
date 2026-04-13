@@ -4,11 +4,10 @@ as complete or pending-rescrape.
 
 Matching: place_id first, then name+address fuzzy fallback.
 Target: reviews_outscraper column from the Excel.
-Complete: reviews_scraped >= reviews_outscraper.
-Rescrape: reviews_scraped < reviews_outscraper → reset to pending with attempts=0.
+Complete: (master_reviews + reviews_scraped) >= reviews_outscraper.
+Rescrape: total_toward_target < reviews_outscraper -> reset to pending with attempts=0.
 """
 
-import os
 import re
 import sqlite3
 
@@ -32,8 +31,7 @@ def load_excel(path: str) -> list[dict]:
     headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
     rows = []
     for row in ws.iter_rows(min_row=2, values_only=True):
-        d = dict(zip(headers, row))
-        rows.append(d)
+        rows.append(dict(zip(headers, row)))
     wb.close()
     return rows
 
@@ -46,13 +44,21 @@ def main():
     conn.row_factory = lambda c, r: dict(zip([d[0] for d in c.description], r))
     cur = conn.cursor()
 
+    cur.execute("PRAGMA table_info(stores)")
+    store_cols = {r["name"] for r in cur.fetchall()}
+    has_master_reviews = "master_reviews" in store_cols
+    master_expr = "master_reviews" if has_master_reviews else "0 AS master_reviews"
+
     cur.execute(
         "SELECT store_id, google_place_id, input_name, gmaps_name, "
         "gmaps_address, input_street, input_city, input_state, "
-        "reviews_scraped, target_reviews, status, attempts FROM stores"
+        f"reviews_scraped, {master_expr}, target_reviews, status, attempts FROM stores"
     )
     db_stores = cur.fetchall()
+    stores_by_id = {s["store_id"]: s for s in db_stores}
+
     print(f"Loaded {len(db_stores)} stores from DB")
+    print(f"master_reviews column present: {has_master_reviews}")
 
     # Build lookup by place_id
     pid_lookup = {}
@@ -72,7 +78,9 @@ def main():
         if name:
             name_addr_lookup[(name, addr)] = s
 
-    matched = 0
+    matched_rows = 0
+    duplicate_store_matches = 0
+    target_by_store: dict[int, int] = {}
     marked_complete = 0
     marked_rescrape = 0
     already_complete = 0
@@ -99,16 +107,14 @@ def main():
         # Fallback: name + address
         if not store and ex_name:
             store = name_addr_lookup.get((ex_name, ex_addr))
-            # Try partial name match if exact fails
             if not store:
+                # Try partial name match with minimum address overlap.
                 for (db_name, db_addr), s in name_addr_lookup.items():
                     if ex_name and db_name and (ex_name in db_name or db_name in ex_name):
-                        # Also check address overlap
                         if ex_addr and db_addr:
                             ex_words = set(ex_addr.split())
                             db_words = set(db_addr.split())
-                            overlap = len(ex_words & db_words)
-                            if overlap >= 2:
+                            if len(ex_words & db_words) >= 2:
                                 store = s
                                 break
 
@@ -119,29 +125,39 @@ def main():
             )
             continue
 
-        matched += 1
-        sid = store["store_id"]
-        scraped = store["reviews_scraped"] or 0
+        matched_rows += 1
+        sid = int(store["store_id"])
 
-        # Update target_reviews
+        # If multiple Excel rows map to one store, keep the larger target
+        # to avoid under-scraping.
+        if sid in target_by_store:
+            duplicate_store_matches += 1
+            target_by_store[sid] = max(target_by_store[sid], target)
+        else:
+            target_by_store[sid] = target
+
+    for sid, target in target_by_store.items():
+        store = stores_by_id[sid]
+        scraped = int(store.get("reviews_scraped") or 0)
+        master = int(store.get("master_reviews") or 0)
+        total_toward_target = scraped + master
+
         cur.execute(
             "UPDATE stores SET target_reviews=?, updated_at=datetime('now') WHERE store_id=?",
             (target, sid),
         )
 
-        if scraped >= target:
-            # Already hit the target - mark complete
+        if total_toward_target >= target:
             if store["status"] == "completed":
                 already_complete += 1
             else:
                 cur.execute(
-                    "UPDATE stores SET status='completed', error_message=NULL, updated_at=datetime('now') "
-                    "WHERE store_id=?",
+                    "UPDATE stores SET status='completed', worker_id=NULL, error_message=NULL, "
+                    "updated_at=datetime('now') WHERE store_id=?",
                     (sid,),
                 )
                 marked_complete += 1
         else:
-            # Needs more reviews - reset for rescraping
             cur.execute(
                 "UPDATE stores SET status='pending', worker_id=NULL, attempts=0, "
                 "error_message=NULL, updated_at=datetime('now') WHERE store_id=?",
@@ -151,7 +167,6 @@ def main():
 
     conn.commit()
 
-    # Final status summary
     cur.execute("SELECT status, COUNT(*) as cnt FROM stores GROUP BY status")
     final_status = {r["status"]: r["cnt"] for r in cur.fetchall()}
     cur.execute("SELECT COUNT(*) as cnt FROM reviews")
@@ -159,19 +174,21 @@ def main():
 
     conn.close()
 
-    print(f"\n=== Results ===")
-    print(f"Matched:              {matched}/{len(excel_rows)}")
-    print(f"Already complete:     {already_complete}")
-    print(f"Newly marked complete:{marked_complete}")
-    print(f"Marked for rescrape:  {marked_rescrape}")
-    print(f"Unmatched Excel rows: {len(unmatched)}")
+    print("\n=== Results ===")
+    print(f"Matched rows:          {matched_rows}/{len(excel_rows)}")
+    print(f"Unique stores matched: {len(target_by_store)}")
+    print(f"Duplicate row matches: {duplicate_store_matches}")
+    print(f"Already complete:      {already_complete}")
+    print(f"Newly marked complete: {marked_complete}")
+    print(f"Marked for rescrape:   {marked_rescrape}")
+    print(f"Unmatched Excel rows:  {len(unmatched)}")
 
     if unmatched:
-        print(f"\n=== Unmatched rows (first 20) ===")
+        print("\n=== Unmatched rows (first 20) ===")
         for u in unmatched[:20]:
             print(u)
 
-    print(f"\n=== Final DB Status ===")
+    print("\n=== Final DB Status ===")
     for status, cnt in sorted(final_status.items()):
         print(f"  {status}: {cnt}")
     print(f"  Total reviews: {total_reviews:,}")

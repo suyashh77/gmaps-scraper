@@ -85,7 +85,7 @@ def run_scraper(
     # If a specific auth file was passed, try it first
     if auth_path:
         if os.path.exists(auth_path):
-            valid_auth.append(auth_path)
+            valid_auth.append(os.path.abspath(auth_path))
         else:
             _log(f"WARNING: Specified auth file not found: {auth_path}")
 
@@ -94,7 +94,7 @@ def run_scraper(
         if fname.startswith("google_auth") and fname.endswith(".json"):
             p = os.path.join(script_dir, fname)
             if p not in valid_auth:
-                valid_auth.append(p)
+                valid_auth.append(os.path.abspath(p))
 
     if valid_auth:
         _log(f"Auth accounts loaded: {[os.path.basename(f) for f in valid_auth]}")
@@ -137,6 +137,8 @@ def run_scraper(
             completed = by_status.get("completed", 0)
             pending = by_status.get("pending", 0) + by_status.get("in_progress", 0)
             failed = by_status.get("failed", 0)
+            cur.execute("SELECT COUNT(*) AS cnt FROM stores")
+            total_stores = cur.fetchone()["cnt"]
 
             if completed > 0 or existing_reviews > 0:
                 _log(
@@ -153,8 +155,8 @@ def run_scraper(
             if reset_failed:
                 _log(f"Reset {reset_failed} failed stores for retry")
 
-            total = len(db.get_pending_stores())
-            _log(f"{total} stores pending to scrape")
+            pending_total = len(db.get_pending_stores())
+            _log(f"{pending_total} stores pending to scrape")
 
     except Exception as e:
         _log(f"ERROR during setup: {e}")
@@ -162,13 +164,13 @@ def run_scraper(
         _log(traceback.format_exc())
         return 1
 
-    if total == 0:
+    if pending_total == 0:
         _log("All stores already scraped! Nothing to do.")
         _log(f"Output: {db_path}")
         return 0
 
-    est_hours = total * 120 / 3600
-    est_str = f"{est_hours:.1f} hours" if est_hours >= 1 else f"{total * 120 / 60:.0f} minutes"
+    est_hours = pending_total * 120 / 3600
+    est_str = f"{est_hours:.1f} hours" if est_hours >= 1 else f"{pending_total * 120 / 60:.0f} minutes"
     _log(f"Estimated time: ~{est_str} (~2 min/store avg)")
     _log(f"Priority: incomplete stores first (closest to done), then fresh stores")
     _log("-" * 50)
@@ -184,7 +186,7 @@ def run_scraper(
     signal.signal(signal.SIGTERM, _handle_signal)
 
     # ── Progress monitor ──────────────────────────────────────────────────
-    REPORT_INTERVAL = 12 * 3600
+    REPORT_INTERVAL = int(config.get("report_interval_hours", 12)) * 3600
     last_report_time = [time.time()]
     monitor_stop = threading.Event()
 
@@ -203,9 +205,9 @@ def run_scraper(
                 completed = by_status.get("completed", 0)
                 failed = by_status.get("failed", 0)
                 pending = by_status.get("pending", 0) + by_status.get("in_progress", 0)
-                pct = (completed / total * 100) if total else 0
+                pct = (completed / total_stores * 100) if total_stores else 0
                 _log(
-                    f"Progress: {completed}/{total} ({pct:.0f}%)  "
+                    f"Progress: {completed}/{total_stores} ({pct:.0f}%)  "
                     f"Reviews: {total_reviews:,}  Failed: {failed}  Remaining: {pending}"
                 )
             except Exception:

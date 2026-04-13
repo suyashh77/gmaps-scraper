@@ -12,12 +12,22 @@ Rules:
 import sqlite3
 import os
 import math
+import shutil
+from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MASTER_DB = os.path.join(SCRIPT_DIR, "Data", "Step_5_master_reviews.db")
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "Data")
 BATCH_SIZE = 500
 TARGET_CAP = 1500
+
+if not os.path.exists(MASTER_DB):
+    raise FileNotFoundError(f"Master DB not found: {MASTER_DB}")
+
+# Defensive backup before mutating target/status fields in the master DB.
+backup_path = MASTER_DB.replace(".db", f"_backup_before_batches_{datetime.now():%Y%m%d_%H%M%S}.db")
+shutil.copy2(MASTER_DB, backup_path)
+print(f"Backup created: {backup_path}")
 
 conn = sqlite3.connect(MASTER_DB)
 cur = conn.cursor()
@@ -72,8 +82,11 @@ print(f"Total remaining reviews to scrape: {total_remaining_reviews:,}")
 
 # ── Step 5: Create batch .db files ───────────────────────────────────────────
 # Clean old batch files
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 for old in [f for f in os.listdir(OUTPUT_DIR) if f.startswith("batch_") and f.endswith(".db")]:
-    os.remove(os.path.join(OUTPUT_DIR, old))
+    old_path = os.path.join(OUTPUT_DIR, old)
+    if os.path.isfile(old_path):
+        os.remove(old_path)
 
 num_batches = math.ceil(len(remaining) / BATCH_SIZE)
 print(f"\nCreating {num_batches} batch DB files in {OUTPUT_DIR}/\n")

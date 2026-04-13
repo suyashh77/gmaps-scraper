@@ -593,27 +593,64 @@ class GoogleMapsScraper:
     # ── Business info extraction ────────────────────────────────────────
 
     async def _extract_total_reviews(self) -> int:
-        try:
-            btn = self.page.locator("button[aria-label*='reviews'], button[aria-label*='Reviews']").first
-            if await btn.is_visible(timeout=2000):
-                label = await btn.get_attribute("aria-label")
-                if label:
-                    m = re.search(r"([\d,]+)\s+reviews?", label, re.IGNORECASE)
-                    if m:
-                        return int(m.group(1).replace(",", ""))
-        except Exception:
-            pass
-        try:
-            texts = await self.page.locator("div.F7nice span, span.UY7F9").all_inner_texts()
-            for t in texts:
-                m = re.search(r"([\d,]+)", t)
-                if m:
-                    val = int(m.group(1).replace(",", ""))
-                    if val > 1:
-                        return val
-        except Exception:
-            pass
-        return 0
+        """
+        Extract the business-level review count.
+
+        Only accepts numbers explicitly tied to the word "review" to avoid
+        false positives like parsing a rating value (e.g. 4.3 -> 4).
+        """
+        counts: list[int] = []
+
+        def _collect_from_text(text: str | None) -> None:
+            if not text:
+                return
+            for m in re.finditer(r"(\d[\d,]*)\s+reviews?\b", text, re.IGNORECASE):
+                try:
+                    counts.append(int(m.group(1).replace(",", "")))
+                except ValueError:
+                    continue
+
+        selectors = [
+            # Primary review-count controls in Maps header
+            "button[jsaction*='pane.rating.moreReviews']",
+            "button[aria-label*='review']",
+            "span[aria-label*='review']",
+            # Fallback areas near the rating header
+            "div.F7nice span",
+            "div.F7nice button",
+            "div.jANrlb span",
+        ]
+
+        for sel in selectors:
+            try:
+                loc = self.page.locator(sel)
+                n = min(await loc.count(), 12)
+                for i in range(n):
+                    el = loc.nth(i)
+                    _collect_from_text(await el.get_attribute("aria-label"))
+                    try:
+                        _collect_from_text(await el.inner_text(timeout=300))
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+        # Some views expose "(1,234)" inside a header block that also contains "reviews".
+        if not counts:
+            try:
+                header_texts = await self.page.locator("div.F7nice, div.jANrlb").all_inner_texts()
+                for txt in header_texts:
+                    if "review" not in (txt or "").lower():
+                        continue
+                    for m in re.finditer(r"\((\d[\d,]*)\)", txt):
+                        try:
+                            counts.append(int(m.group(1).replace(",", "")))
+                        except ValueError:
+                            continue
+            except Exception:
+                pass
+
+        return max(counts) if counts else 0
 
     async def extract_business_info(self) -> dict[str, Any]:
         info = {
@@ -1233,10 +1270,25 @@ class GoogleMapsScraper:
                 self.db.update_store_live_review_count(store_id, live_count)
                 self.logger.info(f"Live Google review count: {live_count}")
 
+            # Guard against limited-view pages that incorrectly show ~4 reviews
+            # for high-target stores. This usually means the session is degraded.
+            limited_view_suspected = (
+                live_count > 0
+                and target_reviews >= 50
+                and live_count <= 5
+            )
+            if limited_view_suspected:
+                self.logger.warning(
+                    "Suspiciously low live count (%s) vs target (%s) - "
+                    "not trusting live-count completion shortcuts",
+                    live_count,
+                    target_reviews,
+                )
+
             # Scrape only what we actually need — don't over-scrape
             scrape_target = effective_target
             # If Google shows fewer reviews than we need, cap to avoid fruitless scrolling
-            if live_count > 0 and live_count < scrape_target:
+            if live_count > 0 and live_count < scrape_target and not limited_view_suspected:
                 self.logger.info(f"Live count ({live_count}) < effective target ({scrape_target}) — capping to live count")
                 scrape_target = live_count
             scrape_target = min(scrape_target, int(self.config["scraping"]["max_reviews_per_store"]))
@@ -1252,16 +1304,28 @@ class GoogleMapsScraper:
                 # Total reviews = what master has + what we collected locally
                 total_reviews = master_reviews + final_count
 
+                # _collect_reviews sets reached_end=True both when:
+                #  1) we truly hit the end, and
+                #  2) we hit scrape_target.
+                # Case (2) should not be treated as "store is complete".
+                reached_true_end = reached_end and collected < scrape_target
+
+                # Trust "target > live" completion only when live_count is plausible
+                # and matches what we actually have for this store.
+                live_shortfall_confirmed = (
+                    live_count > 0
+                    and live_count < target_reviews
+                    and not limited_view_suspected
+                    and abs(total_reviews - live_count) <= 1
+                )
+
                 # Mark complete if:
                 #   1. Total hits target, OR
-                #   2. We reached end of reviews (no more to scrape), OR
-                #   3. Google has fewer reviews than our target (live_count < target)
-                #      and we got most of them
+                #   2. We truly reached end of reviews and confirmed Google live
+                #      count is a plausible lower ceiling for this store.
                 is_done = (
                     total_reviews >= target_reviews
-                    or reached_end
-                    or (live_count > 0 and live_count < target_reviews
-                        and total_reviews >= live_count - 1)
+                    or (reached_true_end and live_shortfall_confirmed)
                 )
                 if is_done:
                     self.db.mark_store_completed(store_id, final_count)
@@ -1274,11 +1338,13 @@ class GoogleMapsScraper:
                     self.db.mark_store_failed(
                         store_id,
                         f"Incomplete [{store_type}]: {final_count} new + {master_reviews} master "
-                        f"= {total_reviews}/{target_reviews} (live={live_count}), attempt {attempt}",
+                        f"= {total_reviews}/{target_reviews} (live={live_count}, reached_end={reached_end}, "
+                        f"limited_view={limited_view_suspected}), attempt {attempt}",
                     )
                     self.logger.warning(
                         f"Store incomplete [{store_type}]: {total_reviews}/{target_reviews} "
-                        f"(live={live_count}), attempt {attempt}, will retry"
+                        f"(live={live_count}, reached_end={reached_end}, limited_view={limited_view_suspected}), "
+                        f"attempt {attempt}, will retry"
                     )
                     return "failed"
             else:

@@ -475,7 +475,7 @@ class DatabaseManager:
         cur.execute("""
             UPDATE stores
             SET status='completed', reviews_scraped=?,
-                error_message=NULL, updated_at=?
+                worker_id=NULL, error_message=NULL, updated_at=?
             WHERE store_id=?
         """, (reviews_scraped, datetime.now().isoformat(), store_id))
         self.conn.commit()
@@ -484,7 +484,7 @@ class DatabaseManager:
         cur = self.conn.cursor()
         cur.execute("""
             UPDATE stores
-            SET status='failed', error_message=?, updated_at=?
+            SET status='failed', worker_id=NULL, error_message=?, updated_at=?
             WHERE store_id=?
         """, (str(error_message)[:500], datetime.now().isoformat(), store_id))
         self.conn.commit()
@@ -493,7 +493,7 @@ class DatabaseManager:
         cur = self.conn.cursor()
         cur.execute("""
             UPDATE stores
-            SET status='skipped', error_message=?, updated_at=?
+            SET status='skipped', worker_id=NULL, error_message=?, updated_at=?
             WHERE store_id=?
         """, (reason[:500], datetime.now().isoformat(), store_id))
         self.conn.commit()
@@ -550,13 +550,11 @@ class DatabaseManager:
         """Check if a store has already been fully scraped."""
         cur = self.conn.cursor()
         cur.execute(
-            "SELECT status, reviews_scraped FROM stores WHERE store_id=?",
+            "SELECT status FROM stores WHERE store_id=?",
             (store_id,),
         )
         row = cur.fetchone()
-        if row and row["status"] == "completed" and (row["reviews_scraped"] or 0) > 0:
-            return True
-        return False
+        return bool(row and row["status"] == "completed")
 
     def get_store_type_stats(self) -> dict[str, Any]:
         """Return counts by store type (fresh vs incomplete) and status."""

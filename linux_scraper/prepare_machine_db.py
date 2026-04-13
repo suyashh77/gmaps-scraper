@@ -26,6 +26,9 @@ def prepare(stores_path: str, master_path: str, out_path: str) -> None:
     if not os.path.exists(master_path):
         print(f"ERROR: Master DB not found: {master_path}")
         sys.exit(1)
+    if os.path.abspath(master_path) == os.path.abspath(out_path):
+        print("ERROR: --out cannot be the same file as --master")
+        sys.exit(1)
 
     print(f"Stores: {stores_path}")
     print(f"Master: {master_path}")
@@ -71,7 +74,13 @@ def prepare(stores_path: str, master_path: str, out_path: str) -> None:
             master_pid_map[r["place_id"]] = r["store_id"]
 
     # ── Create scraper DB ────────────────────────────────────────────────
+    out_dir = os.path.dirname(os.path.abspath(out_path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     if os.path.exists(out_path):
+        if not os.path.isfile(out_path):
+            print(f"ERROR: Output path exists and is not a file: {out_path}")
+            sys.exit(1)
         os.remove(out_path)
 
     from linux_scraper.database import DatabaseManager

@@ -193,7 +193,7 @@ def merge_one(master_conn: sqlite3.Connection, scraper_db_path: str,
     return stats
 
 
-def main():
+def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
         description="Merge scraper result databases into master reviews DB",
     )
@@ -203,7 +203,7 @@ def main():
                         help="Path to master reviews database")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be merged without writing")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not os.path.exists(args.master):
         print(f"ERROR: Master database not found: {args.master}")

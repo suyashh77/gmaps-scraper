@@ -84,7 +84,22 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
     cur.execute("SELECT COALESCE(SUM(reviews_scraped),0) AS total_scraped FROM stores")
     total_scraped = cur.fetchone()["total_scraped"]
 
-    reviews_remaining = capped_target - total_scraped
+    cur.execute("SELECT COALESCE(SUM(master_reviews),0) AS total_master FROM stores")
+    total_master = cur.fetchone()["total_master"]
+
+    cur.execute("""
+        SELECT COALESCE(SUM(
+            CASE
+                WHEN target_reviews > 0 THEN
+                    MIN(1500, target_reviews, COALESCE(master_reviews, 0) + COALESCE(reviews_scraped, 0))
+                ELSE 0
+            END
+        ), 0) AS total_done
+        FROM stores
+    """)
+    total_toward_target = cur.fetchone()["total_done"]
+
+    reviews_remaining = max(capped_target - total_toward_target, 0)
 
     cur.execute(
         "SELECT MIN(created_at) AS first_ts FROM stores"
@@ -110,7 +125,7 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
     # Per-store detail
     cur.execute("""
         SELECT store_id, input_name, input_city, input_state,
-               status, reviews_scraped, target_reviews, gmaps_reviews_count,
+               status, reviews_scraped, master_reviews, target_reviews, gmaps_reviews_count,
                attempts, error_message, updated_at
         FROM stores
         ORDER BY store_id
@@ -176,12 +191,15 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
         ("Completion %", f"{completed / total_stores * 100:.1f}%" if total_stores else "0%"),
         ("", ""),
         ("REVIEWS", ""),
-        ("Total Reviews Collected", f"{total_reviews:,}"),
+        ("Review Rows In DB", f"{total_reviews:,}"),
+        ("Master Reviews (base DB)", f"{total_master:,}"),
+        ("New Reviews Collected (this run)", f"{total_scraped:,}"),
+        ("Total Toward Target (master+new)", f"{total_toward_target:,}"),
         ("Avg Reviews / Store", f"{avg_reviews:.0f}"),
         ("Raw Target Total", f"{raw_target:,}"),
         ("Capped Target (@1500/store)", f"{capped_target:,}"),
         ("Reviews Remaining (capped)", f"{reviews_remaining:,}"),
-        ("Completion % (vs capped)", f"{total_scraped / capped_target * 100:.1f}%" if capped_target else "0%"),
+        ("Completion % (vs capped)", f"{total_toward_target / capped_target * 100:.1f}%" if capped_target else "0%"),
         ("", ""),
         ("TIMING", ""),
         ("Total Scraping Time", _fmt_duration(total_secs)),
@@ -201,9 +219,9 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
     ws2 = wb.create_sheet("Store Detail")
     headers = [
         "Store ID", "Name", "City", "State", "Status",
-        "Reviews Scraped", "Target Reviews", "Capped Target",
-        "Remaining", "% Done", "Google Review Count", "Attempts",
-        "Error", "Last Updated",
+        "Master Reviews", "Reviews Scraped", "Total Toward Target",
+        "Target Reviews", "Capped Target", "Remaining", "% Done",
+        "Google Review Count", "Attempts", "Error", "Last Updated",
     ]
 
     for col_idx, header in enumerate(headers, start=1):
@@ -215,17 +233,21 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
 
     for row_idx, store in enumerate(store_rows, start=2):
         scraped = store["reviews_scraped"] or 0
+        master = store["master_reviews"] or 0
         tgt = store["target_reviews"] or 0
         capped = min(1500, tgt) if tgt > 0 else 0
-        rem = max(capped - scraped, 0)
-        pct = scraped / capped if capped > 0 else 0
+        total_done = min(capped, master + scraped) if capped > 0 else 0
+        rem = max(capped - total_done, 0)
+        pct = total_done / capped if capped > 0 else 0
         values = [
             store["store_id"],
             _safe_cell(store["input_name"] or ""),
             _safe_cell(store["input_city"] or ""),
             _safe_cell(store["input_state"] or ""),
             store["status"] or "",
+            master,
             scraped,
+            total_done,
             tgt,
             capped,
             rem,
@@ -247,7 +269,7 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
                 elif val == "pending":
                     cell.fill = PatternFill(start_color="FFEB9C", fill_type="solid")
             # Format % Done
-            if col_idx == 10:
+            if col_idx == 12:
                 cell.number_format = "0.0%"
 
     # Auto-fit columns
@@ -256,7 +278,7 @@ def generate_report(db_path: str, output_dir: str | None = None) -> str:
             len(headers[col_idx - 1]) + 4, 12
         )
     ws2.column_dimensions["B"].width = 35
-    ws2.column_dimensions["I"].width = 50
+    ws2.column_dimensions["O"].width = 50
 
     # ── Sheet 3: Session Log ─────────────────────────────────────────────
     ws3 = wb.create_sheet("Session Log")
