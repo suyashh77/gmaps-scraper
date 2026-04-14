@@ -119,7 +119,7 @@ def run_single(
                 master_rev = int(store.get("master_reviews") or 0)
                 target_rev = int(store.get("target_reviews") or 0)
                 store_type = "INCOMPLETE" if master_rev > 0 else "FRESH"
-                effective = max(min(1500, target_rev) - master_rev, 1)
+                effective = max(min(1500, target_rev) - master_rev, 0)
                 # Scale timeout: ~1.5s per review needed, min 5 min, max 45 min
                 timeout_sec = max(300.0, min(effective * 1.5, 2700.0))
                 logger.info(

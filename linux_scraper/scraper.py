@@ -107,12 +107,28 @@ class GoogleMapsScraper:
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage",
             "--lang=en-US",
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+            "--disable-background-networking",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-features=TranslateUI",
+            "--disable-ipc-flooding-protection",
+            "--no-first-run",
+            "--password-store=basic",
+            "--use-mock-keychain",
         ]
         # On Linux, add --no-sandbox when running as root or inside a container
         # (Docker, CI) where the user namespace sandbox is not available.
+        # Also apply on any Linux system to avoid pipe closed errors.
         import os as _os
-        if hasattr(_os, "geteuid") and (_os.geteuid() == 0 or _os.path.exists("/.dockerenv")):
+        import sys as _sys
+        is_linux = _sys.platform.startswith("linux")
+        is_root = hasattr(_os, "geteuid") and _os.geteuid() == 0
+        is_docker = _os.path.exists("/.dockerenv")
+        if is_linux or is_root or is_docker:
             launch_args.append("--no-sandbox")
+            launch_args.append("--disable-setuid-sandbox")
         try:
             self.browser = await self._pw.chromium.launch(
                 channel="chrome",
@@ -165,7 +181,7 @@ class GoogleMapsScraper:
         try:
             from playwright_stealth import stealth_async
             await stealth_async(self.page)
-        except (ImportError, Exception):
+        except (ImportError, OSError):
             pass  # stealth not available — scraper works fine without it
 
         # Auto-close any extra tabs/popups (Local Guides links, window.open, etc.)
@@ -174,7 +190,7 @@ class GoogleMapsScraper:
             try:
                 await popup.close()
                 self.logger.debug("Closed popup/extra tab")
-            except Exception:
+            except (OSError, ImportError, RuntimeError):
                 pass
         self.context.on("page", lambda p: asyncio.ensure_future(_close_popup(p)))
 
@@ -239,10 +255,13 @@ class GoogleMapsScraper:
             try:
                 btn = self.page.locator(sel).first
                 if await btn.is_visible(timeout=1800):
-                    await btn.click()
-                    await asyncio.sleep(0.5)
-                    return
-            except Exception:
+                    try:
+                        await btn.click()
+                        await asyncio.sleep(0.5)
+                        return
+                    except OSError:
+                        continue
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
     async def _dismiss_overlays(self) -> None:
@@ -261,10 +280,13 @@ class GoogleMapsScraper:
             try:
                 btn = self.page.locator(sel).first
                 if await btn.is_visible(timeout=600):
-                    await btn.click()
-                    self.logger.info(f"Dismissed overlay: {sel}")
-                    await asyncio.sleep(0.3)
-            except Exception:
+                    try:
+                        await btn.click()
+                        self.logger.info(f"Dismissed overlay: {sel}")
+                        await asyncio.sleep(0.3)
+                    except OSError:
+                        continue
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
     # ── Page detection ──────────────────────────────────────────────────
@@ -280,7 +302,7 @@ class GoogleMapsScraper:
             try:
                 if await self.page.locator(sel).first.is_visible(timeout=2000):
                     return True
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
         return False
 
@@ -317,7 +339,7 @@ class GoogleMapsScraper:
                                 "h1.DUwDvf, h1.fontHeadlineLarge",
                                 timeout=12000,
                             )
-                        except Exception:
+                        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                             pass
                         await asyncio.sleep(random.uniform(2.0, 4.0))
 
@@ -327,7 +349,7 @@ class GoogleMapsScraper:
                             return
                         else:
                             self.logger.warning("Click didn't navigate to business page")
-                except Exception as exc:
+                except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error) as exc:
                     self.logger.debug(f"Selector {sel} failed: {exc}")
                     continue
 
@@ -359,7 +381,7 @@ class GoogleMapsScraper:
         try:
             haystack = (self.page.url + " " + (await self.page.title())).lower()
             return any(t in haystack for t in CAPTCHA_INDICATORS)
-        except Exception:
+        except (OSError, ImportError):
             return False
 
     async def check_for_signin_wall(self) -> bool:
@@ -367,7 +389,7 @@ class GoogleMapsScraper:
         try:
             haystack = (self.page.url + " " + (await self.page.title())).lower()
             return any(t in haystack for t in self.SIGNIN_INDICATORS)
-        except Exception:
+        except (OSError, ImportError):
             return False
 
     async def check_and_handle_blocks(self) -> bool:
@@ -415,7 +437,7 @@ class GoogleMapsScraper:
                 self.logger.warning(f"Stale pause flag ({age_seconds/60:.0f} min old) — deleting and continuing")
                 PAUSE_FLAG.unlink(missing_ok=True)
                 return
-        except Exception:
+        except (OSError, ValueError):
             pass  # unreadable flag — still respect it
 
         pause = random.uniform(cfg["captcha_pause_min"], cfg["captcha_pause_max"])
@@ -423,7 +445,7 @@ class GoogleMapsScraper:
         await asyncio.sleep(pause)
         try:
             PAUSE_FLAG.unlink(missing_ok=True)
-        except Exception:
+        except OSError:
             pass
         await self.restart_browser()
 
@@ -484,7 +506,7 @@ class GoogleMapsScraper:
                 await self._click_first_result_if_needed()
                 if await self._is_on_business_page():
                     return True
-            except Exception as exc:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, OSError) as exc:
                 self.logger.warning(f"Strategy {idx} failed: {exc}")
                 continue
         return False
@@ -527,7 +549,7 @@ class GoogleMapsScraper:
                 page_name = (await self.page.locator(sel).first.inner_text(timeout=2000)).strip()
                 if page_name:
                     break
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
         if not target_name:
@@ -566,7 +588,7 @@ class GoogleMapsScraper:
                     if nums_match and words_overlap >= 1:
                         self.logger.info(f"Verified by address match: '{page_addr}' ~ '{target_addr}'")
                         return True
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, OSError):
                 pass
 
         # ── Name word overlap (fuzzy) ──
@@ -586,7 +608,7 @@ class GoogleMapsScraper:
             try:
                 if await self.page.locator(f"text='{token}'").first.is_visible(timeout=1500):
                     return True
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
         return False
 
@@ -630,9 +652,9 @@ class GoogleMapsScraper:
                     _collect_from_text(await el.get_attribute("aria-label"))
                     try:
                         _collect_from_text(await el.inner_text(timeout=300))
-                    except Exception:
+                    except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                         continue
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
         # Some views expose "(1,234)" inside a header block that also contains "reviews".
@@ -647,7 +669,7 @@ class GoogleMapsScraper:
                             counts.append(int(m.group(1).replace(",", "")))
                         except ValueError:
                             continue
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, OSError):
                 pass
 
         return max(counts) if counts else 0
@@ -664,29 +686,29 @@ class GoogleMapsScraper:
         }
         try:
             info["name"] = await self.page.locator("h1.DUwDvf, h1.fontHeadlineLarge").first.inner_text(timeout=3000)
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
             pass
         try:
             rt = await self.page.locator("div.F7nice span[aria-hidden='true']").first.inner_text(timeout=1500)
             info["overall_rating"] = float(rt.replace(",", "."))
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, ValueError):
             pass
         info["total_reviews"] = await self._extract_total_reviews()
         try:
             info["address"] = (await self.page.locator("button[data-item-id='address']").get_attribute("aria-label", timeout=1200) or "").replace("Address: ", "")
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
             pass
         try:
             info["phone"] = (await self.page.locator("button[data-item-id*='phone:tel']").get_attribute("aria-label", timeout=1200) or "").replace("Phone: ", "")
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
             pass
         try:
             info["website"] = await self.page.locator("a[data-item-id='authority']").get_attribute("href", timeout=1200)
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
             pass
         try:
             info["category"] = await self.page.locator("button.DkEaL").first.inner_text(timeout=1000)
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
             pass
         self.logger.info(f"Business: {info['name']} | Rating: {info['overall_rating']} | Reviews: {info['total_reviews']}")
         return info
@@ -722,10 +744,10 @@ class GoogleMapsScraper:
                         )
                         self.logger.info("Reviews panel loaded successfully")
                         return True
-                    except Exception:
+                    except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                         self.logger.warning("Reviews tab clicked but panel didn't load, trying next selector")
                         continue
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
         # Recovery: we may be in compact/sidebar view — click the store name
@@ -765,11 +787,11 @@ class GoogleMapsScraper:
                                     )
                                     self.logger.info("Reviews panel loaded after expand")
                                     return True
-                                except Exception:
+                                except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                                     continue
-                        except Exception:
+                        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                             continue
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
         self.logger.error("Could not find Reviews tab — even after expand attempts")
@@ -778,7 +800,7 @@ class GoogleMapsScraper:
         try:
             await self.page.screenshot(path="debug_reviews_tab.png")
             self.logger.info("Debug screenshot saved: debug_reviews_tab.png")
-        except Exception:
+        except (OSError, ImportError, RuntimeError):
             pass
 
         return False
@@ -835,11 +857,11 @@ class GoogleMapsScraper:
                                 await asyncio.sleep(random.uniform(2.5, 4.0))
                                 self.logger.info("Sort by newest applied")
                                 return
-                        except Exception:
+                        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                             continue
 
                     self.logger.warning("Sort button clicked but 'Newest' option not found")
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
         self.logger.warning("Could not find sort button — proceeding without sorting")
@@ -860,7 +882,7 @@ class GoogleMapsScraper:
                 count = await self.page.locator(sel).count()
                 if count > 0:
                     return sel
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
         return None
 
@@ -877,7 +899,7 @@ class GoogleMapsScraper:
                     }})()
                 """)
                 return
-            except Exception:
+            except (OSError, ImportError):
                 pass
 
         # Fallback: mouse wheel scroll
@@ -885,7 +907,7 @@ class GoogleMapsScraper:
             scroll_x, scroll_y = await self._get_scroll_position()
             await self.page.mouse.move(scroll_x, scroll_y)
             await self.page.mouse.wheel(0, delta)
-        except Exception:
+        except (OSError, ImportError):
             pass
 
     async def _get_scroll_position(self) -> tuple[float, float]:
@@ -895,7 +917,7 @@ class GoogleMapsScraper:
                 box = await node.bounding_box(timeout=2000)
                 if box:
                     return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
         return 400.0, 450.0
 
@@ -916,7 +938,7 @@ class GoogleMapsScraper:
                     await more_btn.click()
                     await asyncio.sleep(0.3)
                     return
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 continue
 
     async def _extract_review(self, el: Any) -> dict[str, Any] | None:
@@ -931,21 +953,21 @@ class GoogleMapsScraper:
             name, rating, date_rel, review_text = "Anonymous", None, "", ""
             try:
                 name = await el.locator("div.d4r55").first.inner_text(timeout=500)
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 pass
             try:
                 aria = await el.locator("span.kvMYJc").first.get_attribute("aria-label", timeout=500)
                 if aria:
                     rating = int(re.findall(r"\d+", aria)[0])
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, ValueError, IndexError):
                 pass
             try:
                 date_rel = await el.locator("span.rsqaWe").first.inner_text(timeout=500)
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 pass
             try:
                 review_text = (await el.locator("span.wiI7pd").first.inner_text(timeout=500)).replace("\x00", "")
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 pass
             helpful = photo_count = has_owner_response = reviewer_review_count = reviewer_photo_count = is_local_guide = 0
             service_type = ""
@@ -959,7 +981,7 @@ class GoogleMapsScraper:
                 m = re.search(r"(\d[\d,]*)\s+photo", stats)
                 if m:
                     reviewer_photo_count = int(m.group(1).replace(",", ""))
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, ValueError):
                 pass
             try:
                 lbl = await el.locator("button[aria-label*='helpful']").first.get_attribute("aria-label", timeout=350)
@@ -967,22 +989,22 @@ class GoogleMapsScraper:
                     m = re.search(r"(\d+)", lbl)
                     if m:
                         helpful = int(m.group(1))
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, ValueError):
                 pass
             try:
                 photo_count = await el.locator("div.Iop04 img").count()
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 pass
             try:
                 if await el.locator("text='Response from the owner'").first.is_visible(timeout=250):
                     has_owner_response = 1
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 pass
             try:
                 attrs = await el.locator("div.PBK6be span.pVtsbf").all_inner_texts()
                 if attrs:
                     service_type = ", ".join(attrs)
-            except Exception:
+            except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
                 pass
             return {
                 "review_id": rid,
@@ -998,7 +1020,7 @@ class GoogleMapsScraper:
                 "is_local_guide": is_local_guide,
                 "service_type": service_type,
             }
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error, OSError):
             return None
 
     # ── Main review collection loop ─────────────────────────────────────
@@ -1100,8 +1122,11 @@ class GoogleMapsScraper:
                     await self._scroll_reviews_panel(delta=10000)
                     await asyncio.sleep(random.uniform(4.0, 6.0))
                     recovery_visible = await self.page.locator("div[data-review-id]").all()
-                    recovered = sum(1 for el in recovery_visible
-                                    if (await el.get_attribute("data-review-id")) not in seen_ids)
+                    recovered = 0
+                    for el in recovery_visible:
+                        rid = await el.get_attribute("data-review-id")
+                        if rid and rid not in seen_ids:
+                            recovered += 1
                     if recovered > 0:
                         self.logger.info(f"Recovery found {recovered} new reviews — continuing")
                         stall_cycles = 0
@@ -1121,7 +1146,7 @@ class GoogleMapsScraper:
                 if idle_every > 0 and scroll_attempts % idle_every == 0:
                     await asyncio.sleep(random.uniform(rl["idle_pause_min"], rl["idle_pause_max"]))
 
-        except (asyncio.CancelledError, Exception) as exc:
+        except Exception as exc:
             # Flush buffer on timeout/cancellation so partial reviews are saved
             if store_id and self.db and buffer:
                 self.logger.info(f"Flushing {len(buffer)} buffered reviews before exit")
@@ -1164,7 +1189,7 @@ class GoogleMapsScraper:
                 with open("debug_query_failed.html", "w", encoding="utf-8") as f:
                     f.write(await self.page.content())
                 self.logger.info("Debug artifacts saved: debug_query_failed.png, debug_query_failed.html")
-            except Exception:
+            except (OSError, ImportError):
                 pass
             raise RuntimeError(f"Could not open a business page for query: {query}")
         if await self.is_permanently_closed():
@@ -1201,12 +1226,12 @@ class GoogleMapsScraper:
                 "h1.DUwDvf, h1.fontHeadlineLarge",
                 timeout=15000,
             )
-        except Exception:
+        except (playwright._impl._api_types.TimeoutError, playwright._impl._api_types.Error):
             # Save debug info
             try:
                 await self.page.screenshot(path="debug_url_failed.png")
                 self.logger.info("Debug screenshot saved: debug_url_failed.png")
-            except Exception:
+            except (OSError, ImportError):
                 pass
             raise RuntimeError("Business page did not load from URL")
 
@@ -1312,10 +1337,13 @@ class GoogleMapsScraper:
 
                 # Trust "target > live" completion only when live_count is plausible
                 # and matches what we actually have for this store.
+                # We must have collected all available reviews (total >= live_count)
+                # AND the counts should match (we actually got what Google reports).
                 live_shortfall_confirmed = (
                     live_count > 0
                     and live_count < target_reviews
                     and not limited_view_suspected
+                    and total_reviews >= live_count
                     and abs(total_reviews - live_count) <= 1
                 )
 

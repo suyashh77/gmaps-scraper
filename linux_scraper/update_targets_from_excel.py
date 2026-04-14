@@ -1,6 +1,5 @@
 """
-Update store targets from list2_forrester_outscrpenrich.xlsx and mark stores
-as complete or pending-rescrape.
+Update store targets from Excel and mark stores as complete or pending-rescrape.
 
 Matching: place_id first, then name+address fuzzy fallback.
 Target: reviews_outscraper column from the Excel.
@@ -8,8 +7,10 @@ Complete: (master_reviews + reviews_scraped) >= reviews_outscraper.
 Rescrape: total_toward_target < reviews_outscraper -> reset to pending with attempts=0.
 """
 
+import argparse
 import re
 import sqlite3
+import sys
 
 import openpyxl
 
@@ -36,11 +37,18 @@ def load_excel(path: str) -> list[dict]:
     return rows
 
 
-def main():
-    excel_rows = load_excel(EXCEL)
-    print(f"Loaded {len(excel_rows)} rows from Excel")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Update store targets from Excel and mark stores as complete or pending-rescrape"
+    )
+    parser.add_argument("--excel", "-e", default=EXCEL, help="Path to Excel file with targets")
+    parser.add_argument("--db", "-d", default=DB, help="Path to SQLite database")
+    args = parser.parse_args(argv)
 
-    conn = sqlite3.connect(DB)
+    excel_rows = load_excel(args.excel)
+    print(f"Loaded {len(excel_rows)} rows from Excel: {args.excel}")
+
+    conn = sqlite3.connect(args.db)
     conn.row_factory = lambda c, r: dict(zip([d[0] for d in c.description], r))
     cur = conn.cursor()
 
@@ -195,4 +203,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
