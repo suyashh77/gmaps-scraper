@@ -1,0 +1,49 @@
+browser:
+  headless: true
+  navigation_timeout_ms: 45000
+  action_timeout_ms: 6000
+  restart_every_n_queries: 0
+  locale: en-US
+  timezone_id: America/New_York
+  viewport_width_min: 1280
+  viewport_width_max: 1920
+  viewport_height_min: 800
+  viewport_height_max: 1080
+  user_agents:
+    - Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+    - Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
+    - Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+
+scraping:
+  max_reviews_per_query: 1500
+  sort_by_newest: true
+  max_scroll_attempts: 2200
+  stall_threshold: 45
+  scroll_delta_min: 2800
+  scroll_delta_max: 6200
+  min_scroll_delay_sec: 0.4
+  max_scroll_delay_sec: 1.0
+  max_query_retries: 2
+  retry_backoff_sec: 3.0
+
+output:
+  directory: outputs
+  sqlite_path: outputs/reviews.db
+  write_json: true
+  write_jsonl: true
+  write_csv: true
+  save_debug_artifacts_on_error: true
+
+logging:
+  level: INFO
+  file: gmaps_scraper.log
+
+runtime:
+  stop_on_captcha: true
+  captcha_keywords:
+    - unusual traffic
+    - automated queries
+    - not a robot
+    - captcha
+    - recaptcha
+    - sorry/index

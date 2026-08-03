@@ -90,6 +90,25 @@ def run_single(
     max_retries = int(config["retry"]["max_retries"])
 
     async def loop() -> None:
+
+        async def _close_clear_restart():
+            """Kill browser, wipe context/cache, start fresh."""
+            try:
+                await asyncio.wait_for(scraper.close_browser(), timeout=5.0)
+            except Exception:
+                scraper.browser = None
+                scraper.context = None
+                scraper.page = None
+                scraper._pw = None
+            await asyncio.sleep(0)  # flush event loop
+            try:
+                await scraper.start_browser()
+            except Exception as e:
+                logger.error(f"Browser restart failed: {e}")
+                # One more try after a short pause
+                await asyncio.sleep(5)
+                await scraper.start_browser()
+
         await scraper.start_browser()
         processed = 0
         consecutive_crashes = 0
@@ -109,95 +128,72 @@ def run_single(
                             raise
 
                 if store is None:
-                    if not db.get_pending_stores():
-                        logger.info("All stores complete — worker done")
+                    # No pending stores — check if all targets are met
+                    unfinished = db.get_unfinished_stores()
+                    if not unfinished:
+                        logger.info("All stores met their review targets — worker done")
                         break
-                    await asyncio.sleep(3)
+                    # Some stores haven't met targets — reset them to pending and keep going
+                    reset_count = db.reset_unfinished_to_pending()
+                    if reset_count:
+                        logger.info(f"Reset {reset_count} stores that haven't met targets — continuing")
+                    else:
+                        # Stores may be in_progress by another worker, or all pending already
+                        await asyncio.sleep(3)
                     continue
 
                 store_name = (store.get("gmaps_name") or store.get("input_name") or "Unknown")[:50]
-                master_rev = int(store.get("master_reviews") or 0)
-                target_rev = int(store.get("target_reviews") or 0)
-                store_type = "INCOMPLETE" if master_rev > 0 else "FRESH"
-                effective = max(min(1500, target_rev) - master_rev, 0)
-                # Scale timeout: ~1.5s per review needed, min 5 min, max 45 min
-                timeout_sec = max(300.0, min(effective * 1.5, 2700.0))
-                logger.info(
-                    f"Scraping [{store_type}]: {store_name} "
-                    f"(target={target_rev}, capped={min(1500, target_rev)}, master={master_rev}, "
-                    f"need={effective}, timeout={timeout_sec:.0f}s)"
-                )
+                attempt_num = store.get("attempts", 1)
+                logger.info(f"Scraping: {store_name} (attempt #{attempt_num})")
 
                 try:
+                    # 12-minute cap per store
                     status = await asyncio.wait_for(
                         scraper.scrape_single_store(store),
-                        timeout=timeout_sec,
+                        timeout=720.0,
                     )
                     processed += 1
-                    if status in ("completed", "skipped"):
-                        consecutive_crashes = 0  # only reset on clean outcomes
+                    if status in ("completed", "skipped", "retry"):
+                        consecutive_crashes = 0  # reset on any non-crash outcome
 
                     # Restart browser periodically to prevent memory bloat
                     if restart_every > 0 and processed % restart_every == 0:
                         logger.info(f"Periodic browser restart after {restart_every} stores")
-                        await scraper.restart_browser()
+                        await _close_clear_restart()
 
                 except asyncio.TimeoutError:
                     consecutive_crashes += 1
-                    logger.warning(f"'{store_name}' timed out after {timeout_sec:.0f}s — skipping")
-                    db.mark_store_failed(store["store_id"], f"Timeout: exceeded {timeout_sec:.0f}s")
+                    logger.warning(f"'{store_name}' timed out after 12 min (attempt #{attempt_num})")
+                    # Put back to pending so it retries (not failed — failed won't be retried this session)
+                    db.mark_store_pending_retry(
+                        store["store_id"],
+                        f"Timeout on attempt #{attempt_num}",
+                    )
                     processed += 1
-                    # Force-kill browser — graceful close may hang after timeout
-                    try:
-                        await asyncio.wait_for(scraper.close_browser(), timeout=5.0)
-                    except Exception:
-                        scraper.browser = None
-                        scraper.context = None
-                        scraper.page = None
-                        scraper._pw = None
-                    await asyncio.sleep(0)  # flush event loop
-                    try:
-                        await scraper.start_browser()
-                    except Exception as e:
-                        logger.error(f"Browser restart failed after timeout: {e}")
-                        break
+                    # Close, clear cache, restart fresh
+                    await _close_clear_restart()
                     continue
 
                 except Exception as exc:
                     consecutive_crashes += 1
-                    logger.warning(f"'{store_name}' crashed: {type(exc).__name__}: {str(exc)[:150]}")
-                    db.mark_store_failed(store["store_id"], f"{type(exc).__name__}: {str(exc)[:300]}")
+                    logger.warning(f"'{store_name}' crashed (attempt #{attempt_num}): {type(exc).__name__}: {str(exc)[:150]}")
+                    # Put back to pending so it retries with the next sort order
+                    db.mark_store_pending_retry(
+                        store["store_id"],
+                        f"Attempt #{attempt_num} crash: {type(exc).__name__}: {str(exc)[:200]}",
+                    )
                     processed += 1
 
                     if consecutive_crashes >= 5:
-                        # Back off for 5 minutes instead of stopping completely —
-                        # transient network issues or temporary Google blocks can
-                        # cause 5+ consecutive failures, and stopping would leave
-                        # the remaining stores unscraped.
                         logger.warning("5 consecutive crashes — pausing 5 minutes then retrying")
-                        try:
-                            await scraper.close_browser()
-                        except Exception:
-                            pass
+                        await _close_clear_restart()
                         await asyncio.sleep(300)
                         consecutive_crashes = 0
-                        try:
-                            await scraper.start_browser()
-                        except Exception as e:
-                            logger.error(f"Browser restart failed after backoff: {e}")
-                            break
                         continue
 
-                    try:
-                        await scraper.close_browser()
-                    except Exception:
-                        pass
+                    # Close, clear cache, restart fresh
+                    await _close_clear_restart()
                     await asyncio.sleep(3)
-                    try:
-                        await scraper.start_browser()
-                    except Exception as e:
-                        logger.error(f"Browser restart failed: {e}")
-                        break
                     continue
 
         finally:

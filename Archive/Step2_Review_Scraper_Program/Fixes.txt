@@ -1,0 +1,10 @@
+Summary of Chief Complaints
+Resource Management (Tab Bloat): The program repeatedly opens new browser tabs for Local Guides reviews without closing them. This clutters the user's workspace and risks system instability or memory crashes during an 8-hour run.
+
+Fragile Error Handling: The scraper appears to lack a "resume" or "skip" function. When it encountered a single problematic store, it timed out and halted the entire process rather than logging the error and moving to the next store.
+
+File Picker Instability: Users reported "snafus" or confusion when interacting with the file selection interface. This suggests the manual file-loading process is not yet robust enough for a large, non-technical group.
+
+Lack of "Garbage Cleaning": The script does not effectively clean up its own processes. Specifically, it fails to close browser contexts or tabs after a store is completed, leading to an accumulation of background processes that can slow down the computer.
+
+Long Runtime Sensitivity: With a projected 8-hour runtime, the current lack of a checkpoint system means any minor interruption (like a laptop going to sleep or a temporary Wi-Fi drop) results in a total loss of progress for that batch.
