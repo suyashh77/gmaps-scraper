@@ -1,0 +1,38 @@
+# Virtual environments
+venv/
+venv_*/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Auth sessions (machine-specific, re-created per machine)
+google_auth_*.json
+google_auth_*.json.banned
+
+# Machine ID (auto-generated per machine)
+machine_id.txt
+
+# Debug artifacts
+debug_*.png
+debug_*.html
+
+# Output databases (generated per run)
+*.db
+
+# Reports (generated automatically)
+reports/
+
+# Test files
+test_*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Pause flag
+pause.flag

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gmaps-reviews-scraper"
+version = "0.1.0"
+description = "Reliable Google Maps reviews scraper with newest-first sorting."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "playwright>=1.40.0",
+  "PyYAML>=6.0",
+]
+
+[project.scripts]
+gmaps-reviews-scraper = "gmaps_reviews_scraper.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gmaps_reviews_scraper*"]

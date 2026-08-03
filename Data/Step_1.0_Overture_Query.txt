@@ -1,0 +1,73 @@
+LOAD spatial;
+LOAD httpfs;
+
+SET s3_region='us-west-2';
+
+COPY (
+    SELECT
+        names.primary as name,
+        categories.primary as primary_category,
+        categories.alternate as alternate_categories,
+        addresses[1].freeform as street,
+        addresses[1].locality as city,
+        addresses[1].region as state,
+        addresses[1].postcode as zipcode,
+        addresses[1].country as country,
+        phones,
+        websites,
+        ST_Y(geometry) as latitude,
+        ST_X(geometry) as longitude,
+        sources
+    FROM read_parquet('s3://overturemaps-us-west-2/release/2026-01-21.0/theme=places/type=place/*')
+    WHERE 
+        addresses[1].country = 'US'
+        AND (
+            categories.primary IN (
+                'supermarket',
+                'superstore',
+                'convenience_store',
+                'grocery_store',
+                'specialty_grocery_store',
+                'organic_grocery_store',
+                'ethical_grocery',
+                'asian_grocery_store',
+                'indian_grocery_store',
+                'japanese_grocery_store',
+                'korean_grocery_store',
+                'mexican_grocery_store',
+                'russian_grocery_store',
+                'kosher_grocery_store',
+                'international_grocery_store',
+                'public_market',
+                'farmers_market',
+                'health_food_store',
+                'butcher_shop',
+                'fishmonger',
+                'fruits_and_vegetables'
+            )
+            OR list_has_any(categories.alternate, [
+                'supermarket',
+                'superstore',
+                'convenience_store',
+                'grocery_store',
+                'specialty_grocery_store',
+                'organic_grocery_store',
+                'ethical_grocery',
+                'asian_grocery_store',
+                'indian_grocery_store',
+                'japanese_grocery_store',
+                'korean_grocery_store',
+                'mexican_grocery_store',
+                'russian_grocery_store',
+                'kosher_grocery_store',
+                'international_grocery_store',
+                'public_market',
+                'farmers_market',
+                'health_food_store',
+                'butcher_shop',
+                'fishmonger',
+                'fruits_and_vegetables'
+            ])
+        )
+)TO  'C:/Users/19193/Documents/us_supermarkets.csv' (HEADER, DELIMITER ',');
+

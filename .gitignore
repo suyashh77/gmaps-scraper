@@ -1,0 +1,35 @@
+# ── Secrets: Playwright storage_state files = live Google session cookies ──
+Auth/
+google_auth*.json
+*.json.banned
+.env
+
+# ── Data artifacts (too large for git; regenerate via the pipeline) ──
+Data/*
+!Data/*.md
+!Data/Step_1.0_Overture_Query.txt
+*.db
+*.db-wal
+*.db-shm
+*.db.bak_*
+*.csv
+*.xlsx
+*.geojson
+
+# ── Runtime junk ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+pause.flag
+machine_id.txt
+.last_file
+debug_*.png
+
+# ── Editor / OS ──
+.obsidian/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
