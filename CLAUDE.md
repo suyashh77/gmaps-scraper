@@ -16,7 +16,7 @@ and repair of the master DB), `Deploy/README.md` (volunteer kits), `Data/README.
   record a reason, or move them to a side database (`Step_5_out_of_scope`, `_closed_stores`,
   `_excluded_stores`). Nothing is dropped; set-aside reviews go to `quarantined_reviews`.
 - **Freeze v2 is the final dataset** (`Data/Step_5_master_reviews_FROZEN_2026-10-24.db`, SHA in
-  `Remediation/master_freeze_manifest_v2.json`; v1 of 2026-10-11 kept). Read it; do not write to it. Scraping is
+  `Remediation/master_freeze_manifest_v2.json`; v1 of 2026-10-11 deleted at the Phase 1 hand-over, 2026-11-19). Read it; do not write to it. Scraping is
   closed (owner, 2026-10-24). Re-freeze needs a new copy, a new manifest and an updated `STATUS.md`.
 - **If something is missing, check `Archive/DELETED_2026-10-24.md` first.** The handoff cleanup deleted old
   backups, `Deploy/build/` and the machine-pull leftovers. `Dr.ben_data/` and `dewy data/` moved to
