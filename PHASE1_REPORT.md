@@ -1,12 +1,17 @@
-# Phase 1 Project Report: NC Grocery Stores and Their Google Reviews
+# Building the Dataset: The Full Journey
+
+*NC grocery stores and their Google reviews, Phase 1*
 
 **Project:** Aspatial food access in North Carolina, Phase 1 (data collection)
 **Team:** Suyash Sapre, Teresa Groton, Dr. Benjamin Rachunok (Operations Research, ISE, NC State)
 **Status:** Complete. Data collection closed 2026-10-24. Report written 2026-11-19.
 
-This report replaces the earlier scraper hand-off documents (`HANDOFF.md`, `STATUS.md`, the scraping docs in `Handover/`). Phase 2, the scoring pipeline, gets its own hand-off.
+This is the full narrative. For one page, read `00_START_HERE.pdf`; for each step in detail with its files, open `02_The_Journey/StepN_*/STEP.docx`; for data quality, `Data_Quality_Report.docx`; for every ruling, `Decision_Log.xlsx`.
 
 ---
+
+
+> This is the Phase 1 project report as handed over. Folder paths such as `01_Final_Dataset/` and `02_The_Journey/` refer to the deliverables folder `1_Building_the_Dataset/`, which holds the data (not in this repo). In this repo, the code for each step lives in `Frame/`, `Scraper_v2/`, `Remediation/` and `Deploy/`; see `README.md`.
 
 ## 1. The question
 
@@ -24,24 +29,25 @@ Build the statewide dataset the method needs: **every in-scope grocery store in 
 | Reviews | **1,941,538** Google reviews, **977,398** with text |
 | Completeness | 4,400 stores complete, 42 short (955 reviews in total). 99.6% of reviews collected against targets capped at 1,500 |
 | Scale vs. pilot | 91× the stores and 39× the text reviews of the Raleigh pilot |
-| Final file | `03_Data/1_reviews/Step_5_master_reviews_FROZEN_2026-10-24.db` (SQLite, read-only, SHA-256 in `master_freeze_manifest_v2.json`) |
-| Store table | `03_Data/4_final_store_list/NC_Grocery_POIs_v2.csv` / `.xlsx` (one row per store, 4,442 rows, rebuilt from the final freeze) |
+| Final file | `01_Final_Dataset/Step_5_master_reviews_FROZEN_2026-10-24.db` (SQLite, read-only, SHA-256 in `master_freeze_manifest_v2.json`) |
+| Store table | `01_Final_Dataset/NC_Grocery_POIs_v2.csv` / `.xlsx` (one row per store, 4,442 rows, rebuilt from the final freeze) |
 
-## 4. How it was built, in six steps
+## 4. How we got there: Step 0 to Step 6
 
-1. **Store universe (the "frame").** We combined four public sources: USDA SNAP retailers, Overture Maps (two releases), OpenStreetMap and the project's earlier store list, plus an audit of previously excluded stores. Together that was 91,461 records. Records describing the same store were matched by distance and name similarity, with SNAP trusted for the address, Overture for the name and Google for the identity. That produced a frame of **36,820** stores. We checked it against Data Axle, Dewey (SafeGraph) Places and Census business counts. Every one of the 8,883 SNAP-authorised retailers is in the frame, in all 19 NC ZIP3 regions.
-2. **Google probe.** For each candidate (16,751 established bricks-and-mortar food stores), a script searched Google Maps by name and address. It recorded the store's place ID, its category, its live review count and whether it was open.
+0. **The first attempt (Jan–Apr 2026).** Overture Maps alone → Google and Outscraper lookups → 13 kept categories → 4,889 stores → 1.2 million reviews scraped by search-by-name, partly by ISE 408 students. A September audit found wrong-location scrapes (Sam's Club "Hendersonville" holding a Raleigh store's 1,062 reviews), 157 stores marked complete with 0 reviews, and a store list that kept only 14–38% of candidates in some regions, worst in rural eastern NC. **We rebuilt from scratch**; what survived was only what later steps re-verified. (`02_The_Journey/Step0_First_Attempt_Jan-Apr2026/`)
+1. **Store universe (the "frame").** We combined four public sources: USDA SNAP retailers, Overture Maps (two releases), OpenStreetMap and the project's earlier store list, plus an audit of previously excluded stores. Together that was 91,461 records. Records describing the same store were matched by distance and name similarity, with SNAP trusted for the address, Overture for the name and Google for the identity. That produced a frame of **36,820** stores. We checked it against Data Axle, Dewey (SafeGraph) Places and Census business counts. Every one of the 8,883 SNAP-authorised retailers is in the frame, in all 19 NC ZIP3 regions. (`02_The_Journey/Step1_Store_Universe/`)
+2. **Google probe.** For each candidate (16,751 established bricks-and-mortar food stores), a script searched Google Maps by name and address. It recorded the store's place ID, its category, its live review count and whether it was open. (`02_The_Journey/Step2_Google_Probe/`)
 3. **Labeling and scope.** We hand-ruled about 300 Google categories as in or out of scope (`category_ruleset.csv`), then ran seven rounds of manual checks.
    - In: chains with more than five locations, plus grocery stores, supermarkets, dollar stores, butchers, seafood markets, ethnic and health-food grocers.
    - Out: gas stations, convenience stores, closed stores, farmers' markets, produce stands, and restaurants that sell some groceries.
-   - Out-of-scope, closed and duplicate stores were moved to side databases, never deleted.
+   - Out-of-scope, closed and duplicate stores were moved to side databases, never deleted. (`02_The_Journey/Step3_Labeling_and_Scope/`)
 4. **Review scraping.** A Python + Playwright scraper drove a headless Chrome browser on NC State Linux lab machines, one scraper per machine. It ran in two campaigns:
    - Spring 2026: ISE 408 student batches, scraper v1.
    - Sep–Oct 2026: lab VMs, scraper v2.
 
-   Scraper v2 opens each store by its Google place ID and rejects any page that is not that store.
-5. **Merge and repair.** Each machine's results merged into one master database, with duplicates removed on Google's review ID. Repair scripts (`Remediation/r00`–`r18`) set targets from Google's live counts, restored wrongly set-aside reviews, applied the completion rule and validated the result.
-6. **Freeze.** A read-only copy of the master plus a checksum manifest. Freeze v2 (2026-10-24) is final.
+   Scraper v2 opens each store by its Google place ID and rejects any page that is not that store. (`02_The_Journey/Step4_Review_Scraping/`)
+5. **Merge and repair.** Each machine's results merged into one master database, with duplicates removed on Google's review ID. Repair scripts (`Remediation/r00`–`r18`) set targets from Google's live counts, restored wrongly set-aside reviews, applied the completion rule and validated the result. (`02_The_Journey/Step5_Merge_Repair_Rulings/`)
+6. **Freeze.** A read-only copy of the master plus a checksum manifest. Freeze v2 (2026-10-24) is final. (`02_The_Journey/Step6_Freeze/`)
 
 ## 5. Rules that still bind
 
@@ -52,6 +58,8 @@ Build the statewide dataset the method needs: **every in-scope grocery store in 
 
 ## 6. Known limits of the data, worst first
 
+Full detail, with sizes and what to do about each: `Data_Quality_Report.docx`.
+
 1. **Big stores are truncated.** 257 stores have more than 1,500 reviews on Google. For those we hold the *newest* reviews, not their full history, and not a random sample. Flag them in any per-store analysis. 109 stores have a target of exactly 1,500 (an old capped number), so their true size is unknown.
 2. **Rural stores are the most likely to be missing.** Small rural stores are the ones commercial maps miss. The four-source frame was built to fix this, but it is the main remaining coverage risk.
 3. **Review dates are relative** ("2 years ago"). Exact dates have to be estimated from `scraped_at`.
@@ -59,7 +67,8 @@ Build the statewide dataset the method needs: **every in-scope grocery store in 
 5. **Some fields are unavailable, not zero.** Google no longer shows `helpful_count`, `photo_count` or `service_type`.
 6. **42 stores are short:** 40 are 21–25 reviews short after repeated passes, and 2 (Dollar General 2444, Save A Lot 3860) need a manual check.
 7. **2 stores have coordinates outside NC** (Google's own pin), so they are left off the maps.
-8. **Coverage vs. Google's true counts is 88%.** The 1,941,538 reviews are 99.6% of the capped targets but 87.9% of everything Google lists, because of point 1.
+8. **A few duplicate reviews.** 723 Google review IDs appear twice (724 extra rows): 696 within the same store, and 27 shared by stores 5222 and 8305 ("Los Potrillos", Asheboro), which may be one store. De-duplicate on `review_id`. The 55% of reviews from the spring scrapes have no review ID; de-duplicate those on store, reviewer name, stars and the first 50 characters.
+9. **Coverage vs. Google's true counts is 88%.** The 1,941,538 reviews are 99.6% of the capped targets but 87.9% of everything Google lists, because of point 1.
 
 ## 7. What we learned
 
@@ -72,24 +81,23 @@ Build the statewide dataset the method needs: **every in-scope grocery store in 
 
 ## 8. What was handed to Phase 2
 
-- The frozen review database, the side databases and the final store list v2 (all in `03_Data/`).
+- The frozen review database, the side databases and the final store list v2 (all in `01_Final_Dataset/`).
 - The analysis export (one row per review in the pilot's shape) is built by the Phase 2 pipeline repo, `github.com/suyashh77/nc-aspatial-food-access`.
-- Open small items: the two Round 7 manual stores, a check of the final store list against Census counts (`6_validation_reports/census_validation.csv`), and Wegmans Morrisville (8259), whose stale 1,500 target trips the validator.
+- Open small items: the two Round 7 manual stores, a check of the final store list against Census counts (`02_The_Journey/Step1_Store_Universe/census_validation.csv`), and Wegmans Morrisville (8259), whose stale 1,500 target trips the validator.
 
 ## 9. Where things are
 
 | Folder | What |
 |---|---|
-| `01_Report/` | this report (.md and .docx) |
-| `02_Code/` | the scraper code. Canonical copy on GitHub: `github.com/suyashh77/gmaps-scraper` |
-| `03_Data/1_reviews/` | frozen review database (4,442 stores, 1,941,538 reviews) and its checksum manifest |
-| `03_Data/2_side_databases/` | out-of-scope (4,736 stores), closed (67) and excluded (221) stores with their reviews |
-| `03_Data/3_store_universe/` | the 36,820-store frame (`Step_1_NC_Food_Retail_Frame.db`, `frame.csv`) and the Google probe results (`probe.db`, 16,751 stores) |
-| `03_Data/4_final_store_list/` | one row per final store (`NC_Grocery_POIs_v2`) |
-| `03_Data/5_labeling_and_rulings/` | category rulings, the POI decision sheet, and manual-check rounds 4–7 |
-| `03_Data/6_validation_reports/` | coverage, corroboration, Census comparison, dropped stores and frame gates |
-| `04_Poster/` | 48×36 in academic poster (.pptx and print-ready .pdf) |
-| `05_Walkthrough/` | slide deck and script for walking the team through this folder |
+| `00_START_HERE.pdf` | the one-page map of the journey and this folder |
+| `01_Final_Dataset/` | **the final dataset**: frozen review database + checksum manifest, final store list v2, companion side databases (out of scope, closed, excluded), `Quickstart.ipynb`, `verify_dataset.py` |
+| `02_The_Journey/Step0…Step6/` | every intermediate file, by step, each folder with a `STEP.docx` saying what was done, how, and how to retrace it |
+| `03_Reports/` | this report, `Data_Quality_Report.docx`, `Decision_Log.xlsx` (every ruling, dated), `DATA_LINEAGE_detailed.md` (technical) |
+| `04_Index/` | `File_Index.xlsx` (every file: step, what, rows, size, checksum) and `Data_Dictionary.xlsx` (every column) |
+| `05_Walkthrough/` | 10-minute hand-over deck and script |
+| `Data_Journey.html` | interactive version of the journey (open in any browser, works offline) |
+| `../2_Code/` | the scraper code and `How_To_Use_The_Code.docx`; live repo `github.com/suyashh77/gmaps-scraper` |
+| `../4_Poster/` | 48×36 in academic poster |
 
 ### The main tables in the review database
 
