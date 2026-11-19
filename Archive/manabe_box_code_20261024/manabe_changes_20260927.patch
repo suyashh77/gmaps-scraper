@@ -1,0 +1,693 @@
+diff -ru --strip-trailing-cr -x __pycache__ linux_scraper.bak_20260927/auth_manager.py linux_scraper/auth_manager.py
+--- linux_scraper.bak_20260927/auth_manager.py	2026-03-28 18:55:47.000000000 -0400
++++ linux_scraper/auth_manager.py	2026-09-27 12:06:51.308664021 -0400
+@@ -47,6 +47,7 @@
+         self._pool: list[str] = []
+         self._banned: list[str] = []
+         self._index: int = 0
++        self._held: dict[int, str] = {}
+         self._lock = threading.Lock()
+ 
+         missing: list[str] = []
+@@ -93,6 +94,34 @@
+             self._index += 1
+             return path
+ 
++    def acquire(self, worker_id: int) -> Optional[str]:
++        """Next account in rotation that no other worker currently holds.
++
++        Falls back to plain round-robin when every account is held, so a pool
++        smaller than the worker count still runs rather than stalling.
++        """
++        with self._lock:
++            if not self._pool:
++                return None
++            self._held.pop(worker_id, None)
++            busy = set(self._held.values())
++            for _ in range(len(self._pool)):
++                self._index %= len(self._pool)
++                path = self._pool[self._index]
++                self._index += 1
++                if path not in busy:
++                    self._held[worker_id] = path
++                    return path
++            self._index %= len(self._pool)
++            path = self._pool[self._index]
++            self._index += 1
++            self._held[worker_id] = path
++            return path
++
++    def release(self, worker_id: int) -> None:
++        with self._lock:
++            self._held.pop(worker_id, None)
++
+     def mark_account_banned(self, auth_file: str) -> None:
+         """
+         Remove an account from the rotation pool.
+diff -ru --strip-trailing-cr -x __pycache__ linux_scraper.bak_20260927/config.py linux_scraper/config.py
+--- linux_scraper.bak_20260927/config.py	2026-05-08 11:57:37.000000000 -0400
++++ linux_scraper/config.py	2026-09-27 12:16:07.779685869 -0400
+@@ -8,7 +8,7 @@
+ 
+ DEFAULT_CONFIG: dict[str, Any] = {
+     "browser": {"headless": True, "restart_every_n_stores": 1},
+-    "workers": {"count": 1, "restart_browser_every": 1},
++    "workers": {"count": 2, "restart_browser_every": 1, "stagger_s": 45},
+     "laptop": {
+         "id": 1,
+         "viewport_width_min": 1280,
+@@ -22,6 +22,14 @@
+         "max_scroll_attempts": 8000,
+         "stall_threshold": 60,
+         "sort_by_newest": True,
++        "no_progress_timeout_s": 600,
++        "min_rate_window_s": 900,
++        "min_rate_reviews": 20,
++        "early_stuck_s": 180,
++        "session_swaps_per_store": 1,
++        # Off: with signed-out sessions, dropping NID/SOCS made Maps serve the
++        # limited view (no Reviews tab) 2/2 times vs 0/2 with them kept.
++        "clear_tracking_cookies_on_swap": False,
+     },
+     "rate_limiting": {
+         "min_scroll_delay": 1.5,
+diff -ru --strip-trailing-cr -x __pycache__ linux_scraper.bak_20260927/scraper.py linux_scraper/scraper.py
+--- linux_scraper.bak_20260927/scraper.py	2026-09-25 18:15:02.000000000 -0400
++++ linux_scraper/scraper.py	2026-09-29 09:12:52.060099591 -0400
+@@ -8,10 +8,12 @@
+ import collections
+ import logging
+ import math
++import os
+ import random
+ import re
+ import signal
+ import sys
++import time
+ from datetime import datetime
+ from pathlib import Path
+ from typing import Any
+@@ -72,6 +74,14 @@
+     logger = logging.getLogger(name)
+     if logger.handlers:
+         return logger
++    if worker_id:
++        tag = f"[w{worker_id}] "
++
++        def _tag(record: logging.LogRecord) -> bool:
++            if not str(record.msg).startswith(tag):
++                record.msg = tag + str(record.msg)
++            return True
++        logger.addFilter(_tag)
+     level = getattr(logging, str(config["logging"]["level"]).upper(), logging.INFO)
+     logger.setLevel(level)
+     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+@@ -118,8 +128,15 @@
+         # 1,201,237 reviews without anyone noticing. assert_field_coverage()
+         # turns the tally into a loud failure at the end of each store.
+         self._extract_failures: dict[str, int] = collections.Counter()
++        self.signed_out = False
++        self.last_stop_reason = ""
+ 
+-    async def start_browser(self, auth_file: str | None = None, timeout: float = 60.0) -> None:
++    # Google tracking/consent cookies that are dropped on a stall-triggered
++    # restart; only the login cookies are carried into the new session.
++    TRACKING_COOKIES = {"NID", "AEC", "1P_JAR", "DV", "OTZ", "SOCS", "CONSENT", "UULE"}
++
++    async def start_browser(self, auth_file: str | None = None, timeout: float = 60.0,
++                            fresh_cookies: bool = False) -> None:
+         """
+         Launch Chromium and load a Google auth session.
+ 
+@@ -203,7 +220,7 @@
+         if auth_file and os.path.exists(auth_file):
+             resolved_auth = auth_file
+         elif self.auth_manager and self.auth_manager.has_accounts():
+-            candidate = self.auth_manager.get_next_account()
++            candidate = self.auth_manager.acquire(self.worker_id)
+             if candidate and os.path.exists(candidate):
+                 resolved_auth = candidate
+         else:
+@@ -229,6 +246,19 @@
+             "storage_state": resolved_auth,
+         }
+         self.context = await self.browser.new_context(**context_args)
++        if fresh_cookies:
++            await self.context.clear_cookies()
++            kept = 0
++            if resolved_auth:
++                import json as _json
++                with open(resolved_auth, "r", encoding="utf-8") as fh:
++                    login = [c for c in _json.load(fh).get("cookies", [])
++                             if c.get("name") not in self.TRACKING_COOKIES]
++                if login:
++                    await self.context.add_cookies(login)
++                kept = len(login)
++            self.logger.info(f"Cookies cleared; {kept} login cookies restored")
++        self.signed_out = False
+ 
+         # Basic stealth: hide automation fingerprints
+         self.page = await self.context.new_page()
+@@ -281,7 +311,34 @@
+             )
+             return False
+ 
++    async def persist_auth(self) -> bool:
++        """Write this context's cookies back to its auth file.
++
++        Google rotates __Secure-1PSIDTS during a session. Reloading the original
++        file for every new browser replays a stale cookie, and all three fresh
++        sessions were signed out within about two hours that way on 27 Sep.
++        Only a page that is on Maps and signed in is saved, so a dead session
++        never overwrites the file; a banned (renamed) file is never recreated.
++        """
++        path = self.current_auth_file
++        if not (path and self.context and self.page) or self.signed_out or not os.path.exists(path):
++            return False
++        try:
++            if "google." not in self.page.url or await self.is_signed_out():
++                return False
++            tmp = f"{path}.tmp{self.worker_id}"
++            await asyncio.wait_for(self.context.storage_state(path=tmp), timeout=5)
++            os.replace(tmp, path)
++            self.logger.info(f"Saved rotated cookies to {os.path.basename(path)}")
++            return True
++        except (asyncio.TimeoutError, PlaywrightTimeoutError, PlaywrightError, OSError) as exc:
++            self.logger.warning(f"Could not save cookies to {os.path.basename(path)}: {exc}")
++            return False
++
+     async def close_browser(self) -> None:
++        await self.persist_auth()
++        if self.auth_manager:
++            self.auth_manager.release(self.worker_id)
+         try:
+             if self.browser:
+                 await self.browser.close()
+@@ -324,6 +381,7 @@
+         IMPORTANT: Do NOT press Escape or click generic 'Close' buttons here,
+         as those can clear the search results panel entirely.
+         """
++        await self._dismiss_signin_modal()
+         safe_dismiss_selectors = [
+             "button[aria-label='Dismiss']",
+             "button:has-text('Got it')",
+@@ -335,7 +393,7 @@
+                 btn = self.page.locator(sel).first
+                 if await btn.is_visible(timeout=600):
+                     try:
+-                        await btn.click()
++                        await btn.click(timeout=2000)
+                         self.logger.info(f"Dismissed overlay: {sel}")
+                         await asyncio.sleep(0.3)
+                     except OSError:
+@@ -343,6 +401,39 @@
+             except (PlaywrightTimeoutError, PlaywrightError):
+                 continue
+ 
++    # Signed-out Maps opens a "Sign-in to get the best of Google Maps" modal
++    # (e.g. on clicking Sort). Left open it intercepts every later click, so
++    # each Playwright click burns its full 30s timeout: one review took 90s.
++    _DISMISS_SIGNIN_JS = """
++    (() => {
++      let n = 0;
++      for (const d of document.querySelectorAll('[role=dialog],[role=alertdialog],[aria-modal=true]')) {
++        if (!/sign.?in/i.test(d.innerText || '')) continue;
++        const b = [...d.querySelectorAll('button')].find(x => /^\\s*(dismiss|not now|no thanks|cancel)\\s*$/i.test(x.innerText || ''));
++        if (b) { b.click(); n++; }
++      }
++      return n;
++    })()
++    """
++
++    async def _dismiss_signin_modal(self) -> bool:
++        try:
++            n = await self.page.evaluate(self._DISMISS_SIGNIN_JS)
++        except (PlaywrightTimeoutError, PlaywrightError):
++            return False
++        if n:
++            self.logger.info("Dismissed sign-in modal")
++            await asyncio.sleep(0.4)
++        return bool(n)
++
++    async def is_signed_out(self) -> bool:
++        """True when Maps shows a 'Sign in' control, i.e. the auth session is dead."""
++        try:
++            return await self.page.locator(
++                "a[aria-label='Sign in'], a[href*='ServiceLogin']").count() > 0
++        except (PlaywrightTimeoutError, PlaywrightError):
++            return False
++
+     # ── Page detection ──────────────────────────────────────────────────
+ 
+     async def _is_on_business_page(self) -> bool:
+@@ -1054,6 +1145,10 @@
+     async def _click_reviews_tab(self) -> bool:
+         """Click the Reviews tab on a business page. Returns True if reviews panel is loaded."""
+         self.logger.info("Clicking Reviews tab...")
++        try:
++            await self.page.wait_for_selector("button[role='tab'], div[role='tab']", timeout=6000)
++        except (PlaywrightTimeoutError, PlaywrightError):
++            pass
+ 
+         # Selectors for the reviews tab button (try multiple)
+         tab_selectors = [
+@@ -1071,7 +1166,7 @@
+                 btn = self.page.locator(sel).first
+                 if await btn.is_visible(timeout=2500):
+                     self.logger.info(f"Found Reviews tab with selector: {sel}")
+-                    await btn.click()
++                    await btn.click(timeout=3000)
+                     # Wait for the reviews panel to actually load
+                     try:
+                         await self.page.wait_for_selector(
+@@ -1086,14 +1181,23 @@
+             except (PlaywrightTimeoutError, PlaywrightError):
+                 continue
+ 
++        await self._dismiss_signin_modal()
++        if await self.is_signed_out():
++            self.signed_out = True
++            self.logger.warning(
++                f"No Reviews tab and session is signed out ({os.path.basename(self.current_auth_file or 'none')}) "
++                f"— Google limited view; giving up on this page")
++            self.last_stop_reason = "stalled"
++            return False
++
+         # Recovery: we may be in compact/sidebar view — click the store name
+         # or review count link to force the full detail view with tabs
+         self.logger.warning("No Reviews tab found — attempting to expand to full detail view")
+         expand_selectors = [
+             # Click review count text (e.g. "8 reviews") to go directly to reviews
+-            "button[aria-label*='review']",
++            "button[aria-label*='review']:not([aria-label*='Write' i])",
+             "span[aria-label*='review']",
+-            "a[aria-label*='review']",
++            "a[aria-label*='review']:not([aria-label*='Write' i])",
+             # Click the store name header to expand panel
+             "h1.DUwDvf",
+             "h1.fontHeadlineLarge",
+@@ -1107,7 +1211,8 @@
+                 el = self.page.locator(sel).first
+                 if await el.is_visible(timeout=1500):
+                     self.logger.info(f"Clicking '{sel}' to expand detail view")
+-                    await el.click()
++                    await el.click(timeout=3000)
++                    await self._dismiss_signin_modal()
+                     await asyncio.sleep(random.uniform(2.0, 3.5))
+                     # Now retry finding the Reviews tab
+                     for tab_sel in tab_selectors:
+@@ -1115,7 +1220,7 @@
+                             btn = self.page.locator(tab_sel).first
+                             if await btn.is_visible(timeout=2500):
+                                 self.logger.info(f"Found Reviews tab after expand: {tab_sel}")
+-                                await btn.click()
++                                await btn.click(timeout=3000)
+                                 try:
+                                     await self.page.wait_for_selector(
+                                         "div.jftiEf, div[data-review-id]",
+@@ -1143,10 +1248,15 @@
+ 
+     # ── Sort reviews ───────────────────────────────────────────────────
+ 
+-    async def _sort_reviews(self, sort_order: str = "newest") -> bool:
++    SORT_APPLIED, SORT_OPTION_MISSING, SORT_MENU_UNAVAILABLE = "applied", "option_missing", "menu_unavailable"
++
++    async def _sort_reviews(self, sort_order: str = "newest") -> str:
+         """Click the sort button and select the desired sort order.
+ 
+-        Returns True only when the ordering was actually changed. The caller
++        Returns SORT_APPLIED only when the ordering was actually changed;
++        SORT_MENU_UNAVAILABLE means no rung can apply on this page (signed out:
++        Sort opens a sign-in modal instead of a menu), so the caller should stop
++        walking the ladder. The caller
+         needs that answer: rotating to a sort order that did not apply costs a
+         full stall_threshold of 60 empty cycles before the ladder moves on, and
+         the panel is still in the previous ordering the whole time.
+@@ -1162,6 +1272,8 @@
+           "lowest"   → Lowest rating
+           "highest"  → Highest rating
+         """
++        if self.signed_out:
++            return self.SORT_MENU_UNAVAILABLE
+         self.logger.info(f"Sorting reviews by {sort_order}...")
+         await asyncio.sleep(random.uniform(1.0, 2.0))
+ 
+@@ -1180,7 +1292,7 @@
+         positions = {"relevant": 1, "newest": 2, "highest": 3, "lowest": 4}
+         if sort_order not in labels:
+             self.logger.warning(f"Unknown sort order '{sort_order}' — Google offers {list(labels)}")
+-            return False
++            return self.SORT_OPTION_MISSING
+         label = labels[sort_order]
+         target_options = [
+             f"div[role='menuitemradio']:has-text('{label}')",
+@@ -1198,14 +1310,23 @@
+                     # The menu opens asynchronously. Looking for the option 1-2 s after
+                     # the click missed it on 2,032 of 2,035 attempts in the forrester log;
+                     # wait for the menu itself, and re-open it once if it never appeared.
+-                    for _open_try in range(3):
+-                        await btn.click()
++                    menu_open = False
++                    for _open_try in range(2):
+                         try:
+-                            await self.page.locator(menu_items).first.wait_for(state="visible", timeout=6000)
++                            await btn.click(timeout=3000)
++                            await self.page.locator(menu_items).first.wait_for(state="visible", timeout=4000)
++                            menu_open = True
+                             break
+-                        except (PlaywrightTimeoutError, PlaywrightError):
+-                            self.logger.info("Sort menu did not open — clicking the sort button again")
++                        except (PlaywrightTimeoutError, PlaywrightError) as exc:
++                            if await self._dismiss_signin_modal():
++                                self.signed_out = True
++                                self.logger.warning(
++                                    "Sort opened a sign-in modal — session is signed out, sorting unavailable")
++                                return self.SORT_MENU_UNAVAILABLE
++                            self.logger.info(f"Sort menu did not open: {str(exc).splitlines()[0][:160]}")
+                             await asyncio.sleep(random.uniform(0.8, 1.6))
++                    if not menu_open:
++                        return self.SORT_MENU_UNAVAILABLE
+                     await asyncio.sleep(random.uniform(0.4, 0.9))
+ 
+                     for opt_sel in target_options:
+@@ -1213,10 +1334,10 @@
+                             opt = self.page.locator(opt_sel).first
+                             if await opt.is_visible(timeout=2500):
+                                 self.logger.info(f"Clicking '{sort_order}' option: {opt_sel}")
+-                                await opt.click()
++                                await opt.click(timeout=3000)
+                                 await asyncio.sleep(random.uniform(2.5, 4.0))
+                                 self.logger.info(f"Sort by {sort_order} applied")
+-                                return True
++                                return self.SORT_APPLIED
+                         except (PlaywrightTimeoutError, PlaywrightError):
+                             continue
+ 
+@@ -1238,12 +1359,12 @@
+                     self.logger.warning(
+                         f"'{sort_order}' option not in the sort menu — menu dismissed, "
+                         f"ordering unchanged")
+-                    return False
++                    return self.SORT_OPTION_MISSING
+             except (PlaywrightTimeoutError, PlaywrightError):
+                 continue
+ 
+         self.logger.warning("Could not find sort button — proceeding without sorting")
+-        return False
++        return self.SORT_MENU_UNAVAILABLE
+ 
+     # ── Scroll utilities ────────────────────────────────────────────────
+ 
+@@ -1361,23 +1482,28 @@
+ 
+     # ── Single review extraction ────────────────────────────────────────
+ 
+-    async def _expand_review_text(self, el: Any) -> None:
+-        """Click 'More' / 'See more' button to expand truncated review text."""
+-        expand_selectors = [
+-            "button[aria-label*='See more']",
+-            "button.w8nwRe",
+-            "button:has-text('More')",
+-            "a.review-more-link",
+-        ]
+-        for sel in expand_selectors:
+-            try:
+-                more_btn = el.locator(sel).first
+-                if await more_btn.is_visible(timeout=300):
+-                    await more_btn.click()
+-                    await asyncio.sleep(0.3)
+-                    return
+-            except (PlaywrightTimeoutError, PlaywrightError):
+-                continue
++    # One JS pass per scroll cycle. The old per-review Playwright click waited for
++    # actionability with the default 30s timeout, and a sign-in modal over the
++    # page made every one of those waits run to the end.
++    _EXPAND_ALL_JS = """
++    (() => {
++      let n = 0;
++      document.querySelectorAll('div[data-review-id]').forEach(r => {
++        r.querySelectorAll("button.w8nwRe, button[aria-label*='See more'], a.review-more-link").forEach(b => {
++          if (b.getAttribute('data-scrape-expanded')) return;
++          b.setAttribute('data-scrape-expanded', '1'); b.click(); n++;
++        });
++      });
++      return n;
++    })()
++    """
++
++    async def _expand_all_reviews(self) -> None:
++        try:
++            if await self.page.evaluate(self._EXPAND_ALL_JS):
++                await asyncio.sleep(0.4)
++        except (PlaywrightTimeoutError, PlaywrightError):
++            pass
+ 
+     async def _extract_review(self, el: Any) -> dict[str, Any] | None:
+         try:
+@@ -1385,9 +1511,6 @@
+             if not rid:
+                 return None
+ 
+-            # Expand full review text
+-            await self._expand_review_text(el)
+-
+             name, rating, date_rel, review_text = "Anonymous", None, "", ""
+             try:
+                 name = await el.locator("div.d4r55").first.inner_text(timeout=500)
+@@ -1597,6 +1720,7 @@
+         sort_order: str = "newest",
+         resuming: bool = False,
+     ) -> tuple[int, bool] | tuple[list[dict[str, Any]], bool]:
++        self.last_stop_reason = ""
+         if not await self._click_reviews_tab():
+             self.logger.error("Could not find Reviews tab — aborting review collection")
+             return (0, False) if store_id else ([], False)
+@@ -1624,9 +1748,22 @@
+         # the two rating orders. A run of reviews we already hold, or a stall, moves to
+         # the next rung; the store stops only when every rung is spent. An interrupted
+         # run resumes on the rung it was on.
++        await self._dismiss_overlays()
++        if await self.is_signed_out():
++            if not self.signed_out:
++                self.logger.warning(
++                    f"AUTH SIGNED OUT: {os.path.basename(self.current_auth_file or 'none')} — Google shows "
++                    f"'Sign in'. Sorting is unavailable and reviews load slowly; refresh the auth files.")
++            self.signed_out = True
+         sort_queue = strategy.sort_ladder(resume_from=sort_order if resuming else None)
+         sort_idx = 0
+-        while sort_idx < len(sort_queue) and not await self._sort_reviews(sort_order=sort_queue[sort_idx]):
++        while sort_idx < len(sort_queue):
++            res = await self._sort_reviews(sort_order=sort_queue[sort_idx])
++            if res == self.SORT_APPLIED:
++                break
++            if res == self.SORT_MENU_UNAVAILABLE:
++                sort_idx = len(sort_queue)
++                break
+             self.logger.info(f"Sort '{sort_queue[sort_idx]}' did not apply — trying the next rung")
+             sort_idx += 1
+         if sort_idx >= len(sort_queue):
+@@ -1685,8 +1822,39 @@
+         if fast_mode:
+             self.logger.info(f"Fast-scroll mode enabled (target={max_reviews} > 300)")
+ 
++        # Wall-clock watchdog. The cycle-count stall check alone let a store that
++        # trickled one review every few minutes (or sat in warmup) run the full
++        # three-hour store timeout: 8 of the first 16 failures on manabe.
++        sc = self.config["scraping"]
++        no_progress_s = float(sc.get("no_progress_timeout_s", 600))
++        rate_window_s = float(sc.get("min_rate_window_s", 900))
++        rate_min = int(sc.get("min_rate_reviews", 20))
++        early_stuck_s = float(sc.get("early_stuck_s", 180))
++        started_at = last_new_at = last_persist_at = time.monotonic()
++        few_existing = len(existing_ids) <= 5
++
+         try:
+             while total_collected < max_reviews and scroll_attempts < max_scrolls and not self._shutdown:
++                now = time.monotonic()
++                stuck = None
++                if now - last_new_at >= no_progress_s:
++                    stuck = f"no new reviews in {now - last_new_at:.0f}s"
++                elif now - started_at >= rate_window_s and new_collected < rate_min:
++                    stuck = f"only {new_collected} new reviews in {now - started_at:.0f}s"
++                elif few_existing and new_collected <= 5 and now - started_at >= early_stuck_s:
++                    stuck = f"stuck at {total_collected} reviews after {now - started_at:.0f}s"
++                if stuck:
++                    self.logger.warning(f"Watchdog: {stuck} — ending this pass")
++                    self.last_stop_reason = "stalled"
++                    break
++
++                if now - last_persist_at >= 600:
++                    await self.persist_auth()
++                    last_persist_at = now
++
++                await self._dismiss_signin_modal()
++                await self._expand_all_reviews()
++
+                 if await self.check_for_captcha():
+                     # Flush buffer before breaking so no reviews are lost
+                     if store_id and self.db and buffer:
+@@ -1696,6 +1864,7 @@
+                         self.db.update_store_reviews_count(store_id, persisted)
+                         buffer = []
+                     self.trigger_global_pause("CAPTCHA during review collection")
++                    self.last_stop_reason = "captcha"
+                     break
+ 
+                 # Find all review elements currently in the DOM
+@@ -1760,6 +1929,9 @@
+                     else:
+                         in_memory.append(record)
+ 
++                if new_in_cycle > 0:
++                    last_new_at = time.monotonic()
++
+                 force_switch = early_stop_dup               # known-review run: next rung, no recovery scroll
+                 if early_stop_dup:
+                     early_stop_dup = False
+@@ -1812,7 +1984,11 @@
+                     # costs one attempt instead of another 60 empty cycles spent
+                     # re-reading the ordering we were already in.
+                     while sort_idx < len(sort_queue):
+-                        if await self._sort_reviews(sort_order=sort_queue[sort_idx]):
++                        res = await self._sort_reviews(sort_order=sort_queue[sort_idx])
++                        if res == self.SORT_APPLIED:
++                            break
++                        if res == self.SORT_MENU_UNAVAILABLE:
++                            sort_idx = len(sort_queue)
+                             break
+                         self.logger.info(
+                             f"Sort '{sort_queue[sort_idx]}' did not apply — skipping that rung")
+@@ -1845,6 +2021,9 @@
+                     self.logger.info(
+                         f"All sort orders exhausted — stopping at {total_collected} reviews"
+                     )
++                    # Stuck at the first handful on a large listing is a bad
++                    # session, not the end of the reviews: let the caller swap.
++                    self.last_stop_reason = "stalled" if (few_existing and new_collected <= 5) else "exhausted"
+                     reached_end = True
+                     break
+ 
+@@ -2137,6 +2316,25 @@
+             collected, reached_end = await self.scrape_reviews(
+                 store_id=store_id, target_count=scrape_target,
+                 sort_order=sort_order, resuming=was_interrupted)
++            swaps_left = int(self.config["scraping"].get("session_swaps_per_store", 1))
++            while self.last_stop_reason == "stalled" and swaps_left > 0:
++                swaps_left -= 1
++                old_auth = os.path.basename(self.current_auth_file or "none")
++                await self.close_browser()
++                await asyncio.sleep(random.uniform(5.0, 10.0))
++                await self.start_browser(
++                    fresh_cookies=bool(self.config["scraping"].get("clear_tracking_cookies_on_swap", False)))
++                self.logger.info(
++                    f"Stalled — rotated auth {old_auth} → "
++                    f"{os.path.basename(self.current_auth_file or 'none')}, fresh browser; retrying store")
++                if not await self.navigate_to_store(store):
++                    self.logger.warning("Re-navigation after session swap failed")
++                    break
++                if await self.check_and_handle_blocks():
++                    return "interrupted"
++                collected, reached_end = await self.scrape_reviews(
++                    store_id=store_id, target_count=scrape_target,
++                    sort_order=sort_order, resuming=True)
+             if self.db:
+                 final_count = self.db.get_review_count(store_id)
+                 total_reviews = master_reviews + final_count
+diff -ru --strip-trailing-cr -x __pycache__ linux_scraper.bak_20260927/worker.py linux_scraper/worker.py
+--- linux_scraper.bak_20260927/worker.py	2026-09-06 15:45:04.000000000 -0400
++++ linux_scraper/worker.py	2026-09-29 09:13:05.176164874 -0400
+@@ -68,9 +68,6 @@
+         if reset_failed:
+             logger.info(f"Reset {reset_failed} failed stores for retry")
+ 
+-    db = make_db(db_path)
+-    db.connect()
+-
+     if auth_files is None:
+         auth_files = []
+ 
+@@ -78,19 +75,27 @@
+ 
+     from .scraper import GoogleMapsScraper
+ 
+-    scraper = GoogleMapsScraper(
+-        config=config,
+-        db=db,
+-        worker_id=1,
+-        auth_manager=auth_manager,
+-        machine_id=machine_id,
+-    )
+-
+     max_retries = int(config["retry"]["max_retries"])
++    n_workers = max(1, int(config.get("workers", {}).get("count", 1)))
++    stagger_s = float(config.get("workers", {}).get("stagger_s", 45))
+ 
+-    async def loop() -> None:
++    async def loop(worker_id: int) -> None:
++        # Each worker owns its DB connection and browser; claim_next_store's
++        # BEGIN IMMEDIATE keeps two workers from claiming the same store.
++        db = make_db(db_path)
++        db.connect()
++        scraper = GoogleMapsScraper(
++            config=config,
++            db=db,
++            worker_id=worker_id,
++            auth_manager=auth_manager,
++            machine_id=machine_id,
++        )
++        logger = scraper.logger
+         processed = 0
+         consecutive_crashes = 0
++        if worker_id > 1:
++            await asyncio.sleep(stagger_s * (worker_id - 1))
+ 
+         try:
+             while not stop_event.is_set():
+@@ -98,7 +103,7 @@
+                 store = None
+                 for _ in range(5):
+                     try:
+-                        store = db.claim_next_store(worker_id=1, max_retries=max_retries)
++                        store = db.claim_next_store(worker_id=worker_id, max_retries=max_retries)
+                         break
+                     except sqlite3.OperationalError as e:
+                         if "locked" in str(e).lower():
+@@ -119,10 +124,9 @@
+                 target_rev = int(store.get("target_reviews") or 0)
+                 store_type = "INCOMPLETE" if master_rev > 0 else "FRESH"
+                 effective = max(min(1500, target_rev) - master_rev, 0)
+-                # Per-store budget: 60-minute floor (so even tiny stores get full
+-                # browser-warmup + sort-switching headroom), scaling up to a
+-                # 180-minute ceiling for huge stores. 2 seconds per review needed.
+-                timeout_min = min(180, 60 + effective * 2)
++                # Backstop only: the no-progress watchdog in _collect_reviews ends
++                # stuck stores in minutes. 30 min floor, 2 h ceiling.
++                timeout_min = min(120, 30 + effective // 15)
+                 timeout_sec = float(timeout_min * 60)
+ 
+                 logger.info(f"Starting browser for store {store_id}...")
+@@ -154,7 +158,7 @@
+                     processed += 1
+                     # Force-kill browser — graceful close may hang after timeout
+                     try:
+-                        await asyncio.wait_for(scraper.close_browser(), timeout=5.0)
++                        await asyncio.wait_for(scraper.close_browser(), timeout=15.0)
+                     except Exception:
+                         scraper.browser = None
+                         scraper.context = None
+@@ -202,8 +206,12 @@
+                 await scraper.close_browser()
+             except Exception:
+                 pass
+-            db.release_worker_stores(1)
++            db.release_worker_stores(worker_id)
+             db.close()
+-            logger.info(f"Worker finished. Processed {processed} stores.")
++            logger.info(f"Worker {worker_id} finished. Processed {processed} stores.")
++
++    async def run_all() -> None:
++        logging.getLogger("worker").info(f"Starting {n_workers} parallel worker(s), stagger {stagger_s:.0f}s")
++        await asyncio.gather(*(loop(w) for w in range(1, n_workers + 1)))
+ 
+-    asyncio.run(loop())
++    asyncio.run(run_all())

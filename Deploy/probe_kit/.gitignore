@@ -1,0 +1,9 @@
+.venv/
+results/
+__pycache__/
+*.pyc
+Frame/build/probe.db-shm
+Frame/build/probe.db-wal
+# Live Google session cookies. Never commit these.
+Auth/
+scraper.log

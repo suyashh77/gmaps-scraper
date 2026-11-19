@@ -1,0 +1,15 @@
+[tool.pytest.ini_options]
+testpaths = ["Scraper_v2/tests", "Frame/tests", "Deploy/tests", "Remediation"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["Archive", "Data"]

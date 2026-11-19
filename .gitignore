@@ -15,6 +15,15 @@ Data/*
 *.csv
 *.xlsx
 *.geojson
+# Frame inputs that are gitignored by extension above but are source, not data
+!Frame/category_ruleset.csv
+!Frame/category_ruleset_alt.csv
+# Frame build products and pulled sources (regenerate with Frame/s0*.py)
+Frame/build/
+Frame/sources/
+# Collection kits assembled by Deploy/build_kit.py, and what volunteers send back
+Deploy/build/
+Data/returns/
 
 # ── Runtime junk ──
 __pycache__/
@@ -23,6 +32,9 @@ __pycache__/
 venv/
 *.log
 pause.flag
+*.merge.lock
+*.bak-*
+*.pre-fix-*
 machine_id.txt
 .last_file
 debug_*.png
@@ -33,3 +45,8 @@ debug_*.png
 .idea/
 .DS_Store
 Thumbs.db
+
+# ── Claude Code local state ──
+.claude/
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,1335 @@
+diff --git a/Scraper_v2/linux_scraper/auth_manager.py b/Archive/manabe_box_code_20261024/linux_scraper/auth_manager.py
+index 85c5083..a6b901b 100644
+--- a/Scraper_v2/linux_scraper/auth_manager.py
++++ b/Archive/manabe_box_code_20261024/linux_scraper/auth_manager.py
+@@ -47,6 +47,7 @@ class AuthAccountManager:
+         self._pool: list[str] = []
+         self._banned: list[str] = []
+         self._index: int = 0
++        self._held: dict[int, str] = {}
+         self._lock = threading.Lock()
+ 
+         missing: list[str] = []
+@@ -93,6 +94,34 @@ class AuthAccountManager:
+             self._index += 1
+             return path
+ 
++    def acquire(self, worker_id: int) -> Optional[str]:
++        """Next account in rotation that no other worker currently holds.
++
++        Falls back to plain round-robin when every account is held, so a pool
++        smaller than the worker count still runs rather than stalling.
++        """
++        with self._lock:
++            if not self._pool:
++                return None
++            self._held.pop(worker_id, None)
++            busy = set(self._held.values())
++            for _ in range(len(self._pool)):
++                self._index %= len(self._pool)
++                path = self._pool[self._index]
++                self._index += 1
++                if path not in busy:
++                    self._held[worker_id] = path
++                    return path
++            self._index %= len(self._pool)
++            path = self._pool[self._index]
++            self._index += 1
++            self._held[worker_id] = path
++            return path
++
++    def release(self, worker_id: int) -> None:
++        with self._lock:
++            self._held.pop(worker_id, None)
++
+     def mark_account_banned(self, auth_file: str) -> None:
+         """
+         Remove an account from the rotation pool.
+diff --git a/Scraper_v2/linux_scraper/config.py b/Archive/manabe_box_code_20261024/linux_scraper/config.py
+index b0d2c50..d396172 100644
+--- a/Scraper_v2/linux_scraper/config.py
++++ b/Archive/manabe_box_code_20261024/linux_scraper/config.py
+@@ -8,7 +8,7 @@ from typing import Any
+ 
+ DEFAULT_CONFIG: dict[str, Any] = {
+     "browser": {"headless": True, "restart_every_n_stores": 1},
+-    "workers": {"count": 1, "restart_browser_every": 1},
++    "workers": {"count": 2, "restart_browser_every": 1, "stagger_s": 45},
+     "laptop": {
+         "id": 1,
+         "viewport_width_min": 1280,
+@@ -17,11 +17,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
+     "auth": {"accounts": []},
+     "proxy": {"servers": []},
+     "scraping": {
+-        "max_reviews_per_store": 1500,
++        "max_reviews_per_store": 1_000_000,   # effectively no cap: go for every review Google lists
++        "target_all_live": True,
+         "batch_save_interval": 50,
+-        "max_scroll_attempts": 8000,
++        "max_scroll_attempts": 1_000_000,
+         "stall_threshold": 60,
+         "sort_by_newest": True,
++        "no_progress_timeout_s": 600,
++        "min_rate_window_s": 900,
++        "min_rate_reviews": 20,
++        "early_stuck_s": 180,
++        "session_swaps_per_store": 1,
++        # Off: with signed-out sessions, dropping NID/SOCS made Maps serve the
++        # limited view (no Reviews tab) 2/2 times vs 0/2 with them kept.
++        "clear_tracking_cookies_on_swap": False,
+     },
+     "rate_limiting": {
+         "min_scroll_delay": 1.5,
+diff --git a/Scraper_v2/linux_scraper/database.py b/Archive/manabe_box_code_20261024/linux_scraper/database.py
+index 174ad39..7b3b07e 100644
+--- a/Scraper_v2/linux_scraper/database.py
++++ b/Archive/manabe_box_code_20261024/linux_scraper/database.py
+@@ -451,20 +451,9 @@ class DatabaseManager:
+         SQLite equivalent of PostgreSQL's SELECT FOR UPDATE SKIP LOCKED.
+         Uses retry with backoff on SQLITE_BUSY.
+ 
+-        Priority: never-scraped stores first, then the biggest gap. A batch whose
+-        metadata says claim_order=need (r09 --order need) drops the first rule and
+-        goes strictly biggest gap first.
++        Priority: biggest gap first — stores needing the most reviews go first.
+         """
+         now = datetime.now().isoformat()
+-        try:
+-            claim_order = self.get_metadata("claim_order")
+-        except sqlite3.OperationalError:          # an older batch with no metadata table
+-            claim_order = None
+-        fresh_first = ("" if claim_order in ("need", "pct") else
+-                       "CASE WHEN COALESCE(master_reviews, 0) = 0 THEN 0 ELSE 1 END,")
+-        # claim_order=pct (r09 --order pct): the store furthest short of its OWN target first
+-        share_missing = ("(target_reviews - COALESCE(master_reviews, 0)) * 1.0 / MAX(target_reviews, 1) DESC,"
+-                         if claim_order == "pct" else "")
+         for attempt in range(5):
+             try:
+                 cur = self.conn.cursor()
+@@ -472,7 +461,8 @@ class DatabaseManager:
+                 cur.execute("""
+                     SELECT store_id FROM stores
+                     WHERE status = 'pending' AND attempts < ?
+-                    ORDER BY """ + fresh_first + share_missing + """
++                    ORDER BY
++                        CASE WHEN COALESCE(master_reviews, 0) = 0 THEN 0 ELSE 1 END,
+                         (target_reviews - COALESCE(master_reviews, 0)) DESC,
+                         store_id
+                     LIMIT 1
+diff --git a/Scraper_v2/linux_scraper/merge_results.py b/Archive/manabe_box_code_20261024/linux_scraper/merge_results.py
+index 8ae432d..c79c4bc 100644
+--- a/Scraper_v2/linux_scraper/merge_results.py
++++ b/Archive/manabe_box_code_20261024/linux_scraper/merge_results.py
+@@ -182,17 +182,10 @@ def merge_one(master_conn: sqlite3.Connection, scraper_db_path: str,
+     # ── Load existing dedup keys for matched stores ──
+     matched_master_ids = set(sid_map.values())
+     existing_keys = set()
+-    # Reviews r12 took out (contaminated pages, duplicate copies) count as known, so
+-    # re-merging an old batch cannot put them back.
+-    sources = ["reviews"]
+-    if mc.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+-                  "AND name='quarantined_reviews'").fetchone():
+-        sources.append("quarantined_reviews")
+     for master_sid in matched_master_ids:
+         mc.execute(
+-            " UNION ALL ".join("SELECT reviewer_name, rating, review_text FROM " + t +
+-                               " WHERE store_id=?" for t in sources),
+-            (master_sid,) * len(sources),
++            "SELECT reviewer_name, rating, review_text FROM reviews WHERE store_id=?",
++            (master_sid,),
+         )
+         for r in mc.fetchall():
+             key = (
+@@ -300,10 +293,6 @@ def merge_one(master_conn: sqlite3.Connection, scraper_db_path: str,
+ 
+     # ── Update store review counts and status ──
+     if not dry_run:
+-        # A store with a status_reason carries a ruling (Remediation/r12): its
+-        # status is a decision, not a function of the counts, so keep it.
+-        reason_col = (", status_reason" if _has_column(master_conn, "stores", "status_reason")
+-                      else ", NULL AS status_reason")
+         for master_sid in matched_master_ids:
+             mc.execute(
+                 "SELECT COUNT(*) as cnt FROM reviews WHERE store_id=?",
+@@ -311,8 +300,8 @@ def merge_one(master_conn: sqlite3.Connection, scraper_db_path: str,
+             )
+             new_count = mc.fetchone()["cnt"]
+             mc.execute(
+-                "SELECT target_reviews, reviews_scraped, scrape_status" + reason_col +
+-                " FROM stores WHERE store_id=?",
++                "SELECT target_reviews, reviews_scraped, scrape_status FROM stores "
++                "WHERE store_id=?",
+                 (master_sid,),
+             )
+             store = mc.fetchone()
+@@ -330,9 +319,7 @@ def merge_one(master_conn: sqlite3.Connection, scraper_db_path: str,
+             # the scraping export selects only pending and incomplete stores and
+             # nothing ever demotes a store, those rows became unreachable by
+             # every tool in the pipeline. 'unknown_target' keeps them visible.
+-            if store["status_reason"]:
+-                new_status = store["scrape_status"]
+-            elif target is None or target <= 0:
++            if target is None or target <= 0:
+                 new_status = "unknown_target"
+             elif new_count >= target:
+                 new_status = "complete"
+diff --git a/Scraper_v2/linux_scraper/review_cap.py b/Scraper_v2/linux_scraper/review_cap.py
+deleted file mode 100644
+index ec7ccc4..0000000
+--- a/Scraper_v2/linux_scraper/review_cap.py
++++ /dev/null
+@@ -1,33 +0,0 @@
+-"""Per-batch review cap.
+-
+-Every batch built before 2026-10-12 is capped at 1,500 reviews per store. A batch can lift that by
+-carrying `review_cap` in its metadata table (r09 --cap 0 writes "0"): absent means 1,500, "0" or
+-"none" means no cap, a number is the cap. Anything unreadable falls back to 1,500 so a bad value can
+-never turn into an unbounded scrape.
+-"""
+-
+-from __future__ import annotations
+-
+-DEFAULT_CAP = 1500
+-UNCAPPED = 1_000_000
+-CAPPED_TIMEOUT_CEILING_MIN = 180        # the budget every capped batch has always had
+-UNCAPPED_TIMEOUT_CEILING_MIN = 480      # a store of thousands of reviews needs hours, not 3
+-TIMEOUT_FLOOR_MIN = 60
+-TIMEOUT_MIN_PER_REVIEW = 2              # unchanged from worker.py: min(180, 60 + effective * 2)
+-
+-
+-def review_cap(metadata_value) -> int:
+-    """The cap for a batch from its `review_cap` metadata value (None when the key is absent)."""
+-    text = str(metadata_value).strip().lower() if metadata_value is not None else ""
+-    if text in ("0", "none"):
+-        return UNCAPPED
+-    if text.isdigit() and int(text) > 0:
+-        return int(text)
+-    return DEFAULT_CAP
+-
+-
+-def store_timeout_minutes(effective: int, cap: int) -> int:
+-    """Time allowed for one store: a one-hour floor plus two minutes per review still needed,
+-    up to a ceiling that is 180 minutes for capped batches and 8 hours for uncapped ones."""
+-    ceiling = CAPPED_TIMEOUT_CEILING_MIN if cap <= DEFAULT_CAP else UNCAPPED_TIMEOUT_CEILING_MIN
+-    return min(ceiling, TIMEOUT_FLOOR_MIN + effective * TIMEOUT_MIN_PER_REVIEW)
+diff --git a/Scraper_v2/linux_scraper/scraper.py b/Archive/manabe_box_code_20261024/linux_scraper/scraper.py
+index e003afc..1be1ea6 100644
+--- a/Scraper_v2/linux_scraper/scraper.py
++++ b/Archive/manabe_box_code_20261024/linux_scraper/scraper.py
+@@ -6,12 +6,15 @@ from __future__ import annotations
+ 
+ import asyncio
+ import collections
++import json
+ import logging
+ import math
++import os
+ import random
+ import re
+ import signal
+ import sys
++import time
+ from datetime import datetime
+ from pathlib import Path
+ from typing import Any
+@@ -45,10 +48,16 @@ from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+ 
+ from .auth_manager import AuthAccountManager
+ from .database import DatabaseManager
+-from .review_cap import DEFAULT_CAP, review_cap
+ from . import strategy
+ 
+ PAUSE_FLAG = Path(__file__).parent.parent / "pause.flag"
++
++# Cookies Google sets for ad tracking / consent rather than the session itself.
++# Dropped on a fresh_cookies session swap; clearing them along with everything
++# else made Maps serve the limited view (no Reviews tab) 2/2 times in testing,
++# vs 0/2 when they were kept and only the rest of the cookie jar was cleared.
++TRACKING_COOKIES = {"NID", "AEC", "1P_JAR", "DV", "OTZ", "SOCS", "CONSENT", "UULE"}
++
+ CAPTCHA_INDICATORS = [
+     "unusual traffic",
+     "automated queries",
+@@ -68,6 +77,19 @@ USER_AGENT_POOL = [
+ ]
+ 
+ 
++class _WorkerPrefixFilter(logging.Filter):
++    """Tags every record from a worker's logger with "[wN] " so a shared log
++    file interleaved from N parallel workers can still be read per-worker."""
++
++    def __init__(self, worker_id: int):
++        super().__init__()
++        self._prefix = f"[w{worker_id}] "
++
++    def filter(self, record: logging.LogRecord) -> bool:
++        record.msg = f"{self._prefix}{record.msg}"
++        return True
++
++
+ def _logger(config: dict[str, Any], worker_id: int = 0) -> logging.Logger:
+     name = "scraper" if worker_id == 0 else f"worker-{worker_id}"
+     logger = logging.getLogger(name)
+@@ -75,6 +97,8 @@ def _logger(config: dict[str, Any], worker_id: int = 0) -> logging.Logger:
+         return logger
+     level = getattr(logging, str(config["logging"]["level"]).upper(), logging.INFO)
+     logger.setLevel(level)
++    if worker_id != 0:
++        logger.addFilter(_WorkerPrefixFilter(worker_id))
+     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+     sh = logging.StreamHandler(sys.stdout)
+     sh.setFormatter(fmt)
+@@ -111,6 +135,9 @@ class GoogleMapsScraper:
+         self._pw = None
+         self._shutdown = False
+         self._network_down = False
++        self.signed_out = False
++        self.last_stop_reason = ""
++        self.last_rungs_applied = 0
+         self.logger = _logger(config, worker_id)
+         # Per-store tally of extractions that found no element at all, as
+         # distinct from ones that found an element holding zero. Without this
+@@ -120,25 +147,38 @@ class GoogleMapsScraper:
+         # turns the tally into a loud failure at the end of each store.
+         self._extract_failures: dict[str, int] = collections.Counter()
+ 
+-    async def start_browser(self, auth_file: str | None = None, timeout: float = 60.0) -> None:
++    async def start_browser(
++        self, auth_file: str | None = None, timeout: float = 60.0,
++        fresh_cookies: bool = False,
++    ) -> None:
+         """
+         Launch Chromium and load a Google auth session.
+ 
+         Auth priority:
+           1. auth_file argument (explicit override)
+-          2. auth_manager.get_next_account() (pool rotation)
++          2. auth_manager.acquire(worker_id) (pool rotation, avoids accounts
++             held by other workers)
+           3. config browser.google_auth_file (single-account fallback)
+           4. No auth (limited view — Reviews tab hidden)
+-        
++
+         Args:
+             timeout: Maximum time to wait for browser startup (seconds)
++            fresh_cookies: drop everything in the loaded storage_state except
++                the auth file's own (non-tracking) cookies. Used when rotating
++                to a new browser after a stalled store, so ad-tracking cookies
++                from the dead session don't follow into the new one — but the
++                actual sign-in cookies still do, since dropping those too
++                pushed Maps into the no-Reviews-tab limited view.
+         """
++        self.signed_out = False
+         import asyncio
+         laptop = self.config.get("laptop", {})
+         ua_list = laptop.get("user_agents") or USER_AGENT_POOL
+         user_agent = random.choice(ua_list)
+         w = random.randint(laptop.get("viewport_width_min", 1280), laptop.get("viewport_width_max", 1920))
+-        h = random.randint(800, 1080)
++        # Below about 850px tall Maps does not mount the review list until the panel is
++        # scrolled, so a third of launches saw "panel didn't load" and gave up.
++        h = random.randint(920, 1080)
+ 
+         self._pw = await async_playwright().start()
+         # Try real Chrome first (bypasses Google's automation detection)
+@@ -158,6 +198,7 @@ class GoogleMapsScraper:
+             "--password-store=basic",
+             "--use-mock-keychain",
+         ]
++        launch_args += self.config["browser"].get("extra_args", [])
+         # On Linux, add --no-sandbox when running as root or inside a container
+         # (Docker, CI) where the user namespace sandbox is not available.
+         # Also apply on any Linux system to avoid pipe closed errors.
+@@ -204,7 +245,7 @@ class GoogleMapsScraper:
+         if auth_file and os.path.exists(auth_file):
+             resolved_auth = auth_file
+         elif self.auth_manager and self.auth_manager.has_accounts():
+-            candidate = self.auth_manager.get_next_account()
++            candidate = self.auth_manager.acquire(self.worker_id)
+             if candidate and os.path.exists(candidate):
+                 resolved_auth = candidate
+         else:
+@@ -218,6 +259,12 @@ class GoogleMapsScraper:
+                              f"(pool: {self.auth_manager.account_count() if self.auth_manager else 'n/a'} accounts)")
+         else:
+             self.logger.info("No auth session — using IP rotation mode")
++        # A signed-in session must look like the same browser every time, from
++        # login (stable_user_agent) through every scrape. A random Windows/Mac UA
++        # per launch, on what is really Linux Chromium, got every session signed
++        # out on its first use.
++        if resolved_auth or self.config["browser"].get("stable_user_agent"):
++            user_agent = self._session_user_agent()
+ 
+         context_args = {
+             "user_agent": user_agent,
+@@ -231,6 +278,24 @@ class GoogleMapsScraper:
+         }
+         self.context = await self.browser.new_context(**context_args)
+ 
++        if fresh_cookies and resolved_auth:
++            await self.context.clear_cookies()
++            try:
++                with open(resolved_auth, "r", encoding="utf-8") as fh:
++                    auth_state = json.load(fh)
++                auth_cookies = [
++                    c for c in auth_state.get("cookies", [])
++                    if c.get("name") not in TRACKING_COOKIES
++                ]
++                if auth_cookies:
++                    await self.context.add_cookies(auth_cookies)
++                self.logger.info(
++                    f"fresh_cookies: cleared cookie jar, restored "
++                    f"{len(auth_cookies)} session cookie(s) from the auth file"
++                )
++            except (OSError, json.JSONDecodeError) as exc:
++                self.logger.warning(f"fresh_cookies: could not reload auth cookies: {exc}")
++
+         # Basic stealth: hide automation fingerprints
+         self.page = await self.context.new_page()
+         try:
+@@ -282,7 +347,48 @@ class GoogleMapsScraper:
+             )
+             return False
+ 
++    def _session_user_agent(self) -> str:
++        """The UA this machine's browser really is, minus 'Headless' — stable across launches."""
++        major = (self.browser.version or "0").split(".")[0]
++        if sys.platform.startswith("linux"):
++            platform = "X11; Linux x86_64"
++        elif sys.platform == "darwin":
++            platform = "Macintosh; Intel Mac OS X 10_15_7"
++        else:
++            platform = "Windows NT 10.0; Win64; x64"
++        return (f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 "
++                f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36")
++
++    async def save_session(self) -> bool:
++        """Write the context's current cookies back to the auth file.
++
++        Google rotates the session cookies while the browser runs. Replaying the
++        file's original snapshot on every launch presents cookies Google has
++        already rotated away, so keep the file current. Skipped once the session
++        is signed out, so a dead jar never overwrites a good file.
++        """
++        path = self.current_auth_file
++        # A file renamed to .banned by mark_account_banned must not be recreated.
++        if not (path and self.context) or self.signed_out or not os.path.exists(path):
++            return False
++        try:
++            state = await self.context.storage_state()
++        except (PlaywrightError, OSError) as exc:
++            self.logger.debug(f"save_session: could not read storage state: {exc}")
++            return False
++        if not any(c["name"] == "__Secure-1PSID" and c["domain"].endswith("google.com")
++                   for c in state.get("cookies", [])):
++            return False
++        tmp = f"{path}.tmp{os.getpid()}"
++        with open(tmp, "w", encoding="utf-8") as fh:
++            json.dump(state, fh)
++        os.replace(tmp, path)
++        return True
++
+     async def close_browser(self) -> None:
++        await self.save_session()
++        if self.auth_manager:
++            self.auth_manager.release(self.worker_id)
+         try:
+             if self.browser:
+                 await self.browser.close()
+@@ -319,12 +425,59 @@ class GoogleMapsScraper:
+             except (PlaywrightTimeoutError, PlaywrightError):
+                 continue
+ 
++    async def _dismiss_signin_modal(self) -> bool:
++        """Dismiss the "Sign in to get the best of Google Maps" modal.
++
++        On a signed-out session, clicking Sort (or several other controls)
++        opens this modal instead of the menu it would normally open. Left in
++        place it sits on top of the panel and intercepts every subsequent
++        Playwright click, turning each one into a full click timeout instead
++        of an instant failure. Done as one page.evaluate() so the browser
++        performs the click directly rather than Playwright locating and
++        clicking through whatever is on top.
++
++        Returns True if a modal was found and dismissed.
++        """
++        try:
++            clicked = await self.page.evaluate(
++                """
++                (() => {
++                  const dialogs = document.querySelectorAll(
++                    "[role='dialog'], [role='alertdialog'], [aria-modal='true']");
++                  for (const d of dialogs) {
++                    if (!/sign.?in/i.test(d.textContent || '')) continue;
++                    for (const b of d.querySelectorAll('button')) {
++                      const t = (b.textContent || '').trim();
++                      if (/^(Dismiss|Not now|No thanks|Cancel)$/i.test(t)) {
++                        b.click();
++                        return true;
++                      }
++                    }
++                  }
++                  return false;
++                })()
++                """
++            )
++            return bool(clicked)
++        except (PlaywrightTimeoutError, PlaywrightError, OSError):
++            return False
++
++    async def is_signed_out(self) -> bool:
++        """True if the page is showing Maps' signed-out chrome (a "Sign in" link)."""
++        try:
++            return await self.page.locator(
++                "a[aria-label='Sign in'], a[href*='ServiceLogin']"
++            ).count() > 0
++        except (PlaywrightTimeoutError, PlaywrightError, OSError):
++            return False
++
+     async def _dismiss_overlays(self) -> None:
+         """Dismiss any Google Maps overlay popups that may block interaction.
+-        
++
+         IMPORTANT: Do NOT press Escape or click generic 'Close' buttons here,
+         as those can clear the search results panel entirely.
+         """
++        await self._dismiss_signin_modal()
+         safe_dismiss_selectors = [
+             "button[aria-label='Dismiss']",
+             "button:has-text('Got it')",
+@@ -334,9 +487,9 @@ class GoogleMapsScraper:
+         for sel in safe_dismiss_selectors:
+             try:
+                 btn = self.page.locator(sel).first
+-                if await btn.is_visible(timeout=600):
++                if await btn.is_visible(timeout=2000):
+                     try:
+-                        await btn.click()
++                        await btn.click(timeout=2000)
+                         self.logger.info(f"Dismissed overlay: {sel}")
+                         await asyncio.sleep(0.3)
+                     except OSError:
+@@ -1056,6 +1209,14 @@ class GoogleMapsScraper:
+         """Click the Reviews tab on a business page. Returns True if reviews panel is loaded."""
+         self.logger.info("Clicking Reviews tab...")
+ 
++        # Give the tab strip itself a chance to mount before hunting through
++        # the (larger, slower) individual selectors below.
++        try:
++            await self.page.locator("button[role='tab'], div[role='tab']").first.wait_for(
++                state="visible", timeout=6000)
++        except (PlaywrightTimeoutError, PlaywrightError):
++            pass
++
+         # Selectors for the reviews tab button (try multiple)
+         tab_selectors = [
+             "button[aria-label*='Reviews']",
+@@ -1072,7 +1233,7 @@ class GoogleMapsScraper:
+                 btn = self.page.locator(sel).first
+                 if await btn.is_visible(timeout=2500):
+                     self.logger.info(f"Found Reviews tab with selector: {sel}")
+-                    await btn.click()
++                    await btn.click(timeout=3000)
+                     # Wait for the reviews panel to actually load
+                     try:
+                         await self.page.wait_for_selector(
+@@ -1082,19 +1243,42 @@ class GoogleMapsScraper:
+                         self.logger.info("Reviews panel loaded successfully")
+                         return True
+                     except (PlaywrightTimeoutError, PlaywrightError):
++                        # The list may simply not be mounted yet: nudge the panel once.
++                        await self._scroll_reviews_panel(delta=700)
++                        try:
++                            await self.page.wait_for_selector(
++                                "div.jftiEf, div[data-review-id]", timeout=5000)
++                            self.logger.info("Reviews panel loaded after a nudge scroll")
++                            return True
++                        except (PlaywrightTimeoutError, PlaywrightError):
++                            pass
+                         self.logger.warning("Reviews tab clicked but panel didn't load, trying next selector")
+                         continue
+             except (PlaywrightTimeoutError, PlaywrightError):
+                 continue
+ 
++        # No Reviews tab anywhere. On a signed-out session this is often
++        # because the page is showing Maps' "limited view" (no tab strip at
++        # all) rather than a compact layout worth clicking around in — and
++        # the fallback below would just walk into a sign-in modal. Bail out
++        # fast instead of burning the click-around fallback on a page that
++        # was never going to have a Reviews tab.
++        await self._dismiss_signin_modal()
++        if await self.is_signed_out():
++            self.logger.warning("No Reviews tab and session is signed out — limited view")
++            self.last_stop_reason = "stalled"
++            return False
++
+         # Recovery: we may be in compact/sidebar view — click the store name
+-        # or review count link to force the full detail view with tabs
++        # or review count link to force the full detail view with tabs.
++        # "Write a review" is deliberately excluded: it opens a sign-in modal,
++        # not the detail view, and that modal then blocks every later click.
+         self.logger.warning("No Reviews tab found — attempting to expand to full detail view")
+         expand_selectors = [
+             # Click review count text (e.g. "8 reviews") to go directly to reviews
+-            "button[aria-label*='review']",
+-            "span[aria-label*='review']",
+-            "a[aria-label*='review']",
++            "button[aria-label*='review']:not([aria-label*='Write' i])",
++            "span[aria-label*='review']:not([aria-label*='Write' i])",
++            "a[aria-label*='review']:not([aria-label*='Write' i])",
+             # Click the store name header to expand panel
+             "h1.DUwDvf",
+             "h1.fontHeadlineLarge",
+@@ -1108,15 +1292,16 @@ class GoogleMapsScraper:
+                 el = self.page.locator(sel).first
+                 if await el.is_visible(timeout=1500):
+                     self.logger.info(f"Clicking '{sel}' to expand detail view")
+-                    await el.click()
++                    await el.click(timeout=3000)
+                     await asyncio.sleep(random.uniform(2.0, 3.5))
++                    await self._dismiss_signin_modal()
+                     # Now retry finding the Reviews tab
+                     for tab_sel in tab_selectors:
+                         try:
+                             btn = self.page.locator(tab_sel).first
+                             if await btn.is_visible(timeout=2500):
+                                 self.logger.info(f"Found Reviews tab after expand: {tab_sel}")
+-                                await btn.click()
++                                await btn.click(timeout=3000)
+                                 try:
+                                     await self.page.wait_for_selector(
+                                         "div.jftiEf, div[data-review-id]",
+@@ -1144,13 +1329,20 @@ class GoogleMapsScraper:
+ 
+     # ── Sort reviews ───────────────────────────────────────────────────
+ 
+-    async def _sort_reviews(self, sort_order: str = "newest") -> bool:
++    async def _sort_reviews(self, sort_order: str = "newest") -> str:
+         """Click the sort button and select the desired sort order.
+ 
+-        Returns True only when the ordering was actually changed. The caller
+-        needs that answer: rotating to a sort order that did not apply costs a
+-        full stall_threshold of 60 empty cycles before the ladder moves on, and
+-        the panel is still in the previous ordering the whole time.
++        Returns one of three outcomes rather than a plain bool, because
++        "the option we wanted wasn't in the menu" and "there is no menu to
++        speak of" call for different responses from the caller:
++
++          "applied"           the ordering was actually changed.
++          "option_missing"    the menu opened but this rung isn't in it —
++                               try the next rung.
++          "menu_unavailable"  the sort button/menu never opened at all
++                               (usually a signed-out session) — do not
++                               keep walking the ladder, every rung will
++                               fail the same way.
+ 
+         "relevant" used to return immediately on the theory that it is Google's
+         default. Inside the rotation ladder the panel has already been re-sorted
+@@ -1163,6 +1355,12 @@ class GoogleMapsScraper:
+           "lowest"   → Lowest rating
+           "highest"  → Highest rating
+         """
++        if self.signed_out:
++            # Clicking Sort while signed out opens the sign-in modal, not the
++            # menu — every rung would fail identically, so don't even try.
++            self.logger.info("Signed out — skipping Sort click (it only opens the sign-in modal)")
++            return "menu_unavailable"
++
+         self.logger.info(f"Sorting reviews by {sort_order}...")
+         await asyncio.sleep(random.uniform(1.0, 2.0))
+ 
+@@ -1181,7 +1379,7 @@ class GoogleMapsScraper:
+         positions = {"relevant": 1, "newest": 2, "highest": 3, "lowest": 4}
+         if sort_order not in labels:
+             self.logger.warning(f"Unknown sort order '{sort_order}' — Google offers {list(labels)}")
+-            return False
++            return "option_missing"
+         label = labels[sort_order]
+         target_options = [
+             f"div[role='menuitemradio']:has-text('{label}')",
+@@ -1199,14 +1397,25 @@ class GoogleMapsScraper:
+                     # The menu opens asynchronously. Looking for the option 1-2 s after
+                     # the click missed it on 2,032 of 2,035 attempts in the forrester log;
+                     # wait for the menu itself, and re-open it once if it never appeared.
+-                    for _open_try in range(3):
+-                        await btn.click()
++                    menu_opened = False
++                    for _open_try in range(2):
++                        await btn.click(timeout=3000)
+                         try:
+-                            await self.page.locator(menu_items).first.wait_for(state="visible", timeout=6000)
++                            await self.page.locator(menu_items).first.wait_for(state="visible", timeout=4000)
++                            menu_opened = True
+                             break
+                         except (PlaywrightTimeoutError, PlaywrightError):
+                             self.logger.info("Sort menu did not open — clicking the sort button again")
++                            if await self._dismiss_signin_modal():
++                                self.signed_out = True
++                                self.logger.warning(
++                                    "Sort opened a sign-in modal instead of the menu — "
++                                    "marking session signed out")
++                                return "menu_unavailable"
+                             await asyncio.sleep(random.uniform(0.8, 1.6))
++                    if not menu_opened:
++                        self.logger.warning("Sort menu never opened")
++                        return "menu_unavailable"
+                     await asyncio.sleep(random.uniform(0.4, 0.9))
+ 
+                     for opt_sel in target_options:
+@@ -1214,10 +1423,10 @@ class GoogleMapsScraper:
+                             opt = self.page.locator(opt_sel).first
+                             if await opt.is_visible(timeout=2500):
+                                 self.logger.info(f"Clicking '{sort_order}' option: {opt_sel}")
+-                                await opt.click()
++                                await opt.click(timeout=3000)
+                                 await asyncio.sleep(random.uniform(2.5, 4.0))
+                                 self.logger.info(f"Sort by {sort_order} applied")
+-                                return True
++                                return "applied"
+                         except (PlaywrightTimeoutError, PlaywrightError):
+                             continue
+ 
+@@ -1239,12 +1448,12 @@ class GoogleMapsScraper:
+                     self.logger.warning(
+                         f"'{sort_order}' option not in the sort menu — menu dismissed, "
+                         f"ordering unchanged")
+-                    return False
++                    return "option_missing"
+             except (PlaywrightTimeoutError, PlaywrightError):
+                 continue
+ 
+         self.logger.warning("Could not find sort button — proceeding without sorting")
+-        return False
++        return "menu_unavailable"
+ 
+     # ── Scroll utilities ────────────────────────────────────────────────
+ 
+@@ -1362,23 +1571,41 @@ class GoogleMapsScraper:
+ 
+     # ── Single review extraction ────────────────────────────────────────
+ 
+-    async def _expand_review_text(self, el: Any) -> None:
+-        """Click 'More' / 'See more' button to expand truncated review text."""
+-        expand_selectors = [
+-            "button[aria-label*='See more']",
+-            "button.w8nwRe",
+-            "button:has-text('More')",
+-            "a.review-more-link",
+-        ]
+-        for sel in expand_selectors:
+-            try:
+-                more_btn = el.locator(sel).first
+-                if await more_btn.is_visible(timeout=300):
+-                    await more_btn.click()
+-                    await asyncio.sleep(0.3)
+-                    return
+-            except (PlaywrightTimeoutError, PlaywrightError):
+-                continue
++    async def _expand_all_reviews(self) -> int:
++        """Click every truncated review's "More"/"See more" button in one pass.
++
++        Used to be done per-review, inside _extract_review, with Playwright
++        clicks that carry the default 30s timeout. On a signed-out session the
++        sign-in modal sits on top of the panel and intercepts every one of
++        those clicks, so a single review could burn 90s just expanding its
++        text. Doing it as one page.evaluate() means the browser performs the
++        clicks directly — a modal in front of the page can't block a click
++        that never goes through Playwright's own hit-testing.
++
++        Each button is tagged data-scrape-expanded so a later cycle doesn't
++        click it again. Returns the number of buttons clicked this pass.
++        """
++        try:
++            return await self.page.evaluate(
++                """
++                (() => {
++                  let n = 0;
++                  const sels = ["button.w8nwRe", "button[aria-label*='See more']", "a.review-more-link"];
++                  for (const rev of document.querySelectorAll('div[data-review-id]')) {
++                    for (const sel of sels) {
++                      for (const btn of rev.querySelectorAll(sel)) {
++                        if (btn.hasAttribute('data-scrape-expanded')) continue;
++                        btn.setAttribute('data-scrape-expanded', '1');
++                        try { btn.click(); n++; } catch (e) {}
++                      }
++                    }
++                  }
++                  return n;
++                })()
++                """
++            )
++        except (PlaywrightTimeoutError, PlaywrightError, OSError):
++            return 0
+ 
+     async def _extract_review(self, el: Any) -> dict[str, Any] | None:
+         try:
+@@ -1386,9 +1613,6 @@ class GoogleMapsScraper:
+             if not rid:
+                 return None
+ 
+-            # Expand full review text
+-            await self._expand_review_text(el)
+-
+             name, rating, date_rel, review_text = "Anonymous", None, "", ""
+             try:
+                 name = await el.locator("div.d4r55").first.inner_text(timeout=500)
+@@ -1598,9 +1822,17 @@ class GoogleMapsScraper:
+         sort_order: str = "newest",
+         resuming: bool = False,
+     ) -> tuple[int, bool] | tuple[list[dict[str, Any]], bool]:
++        self.last_stop_reason = ""
++        self.last_rungs_applied = 0
+         if not await self._click_reviews_tab():
+             self.logger.error("Could not find Reviews tab — aborting review collection")
+             return (0, False) if store_id else ([], False)
++
++        await self._dismiss_overlays()
++        if await self.is_signed_out():
++            self.logger.warning(f"AUTH SIGNED OUT: {self.current_auth_file}")
++            self.signed_out = True
++
+         # Resume: prefer saved sort order from a prior crashed/interrupted run,
+         # so seen_ids picks up where we left off in the same review ordering.
+         # The saved order is only honoured when the previous run of this store
+@@ -1627,7 +1859,15 @@ class GoogleMapsScraper:
+         # run resumes on the rung it was on.
+         sort_queue = strategy.sort_ladder(resume_from=sort_order if resuming else None)
+         sort_idx = 0
+-        while sort_idx < len(sort_queue) and not await self._sort_reviews(sort_order=sort_queue[sort_idx]):
++        while sort_idx < len(sort_queue):
++            sort_result = await self._sort_reviews(sort_order=sort_queue[sort_idx])
++            if sort_result == "applied":
++                self.last_rungs_applied += 1
++                break
++            if sort_result == "menu_unavailable":
++                self.logger.warning("Sort menu unavailable — skipping remaining sort rungs")
++                sort_idx = len(sort_queue)
++                break
+             self.logger.info(f"Sort '{sort_queue[sort_idx]}' did not apply — trying the next rung")
+             sort_idx += 1
+         if sort_idx >= len(sort_queue):
+@@ -1652,12 +1892,11 @@ class GoogleMapsScraper:
+         total_collected = len(existing_ids)
+         # New reviews collected this run (excludes pre-existing batch DB reviews)
+         new_collected = 0
+-        # Consecutive-known-review counter: when we hit a dense overlap zone with master,
+-        # break out early instead of scrolling through everything we already have
+-        consecutive_known = 0
+-        # N reviews in a row already in master means this ordering has reached the part
+-        # of the listing we hold; move to the next sort rung rather than stop.
+-        max_consecutive_known = strategy.KNOWN_RUN_SWITCH
++        # Reviews the page loaded this run that we had not seen, whether or not they
++        # were new to us. Progress means the panel is still loading reviews, not that
++        # new ones were saved: stopping at a run of reviews master already holds never
++        # reached the missing ones on stores that already had many.
++        loaded_total = 0
+ 
+         if total_collected > 0:
+             self.logger.info(f"Resuming: {total_collected} reviews already in DB, collecting up to {max_reviews - total_collected} more")
+@@ -1672,7 +1911,6 @@ class GoogleMapsScraper:
+         stall_cycles = 0
+         scroll_attempts = 0
+         reached_end = False
+-        early_stop_dup = False
+         max_scrolls = int(self.config["scraping"]["max_scroll_attempts"])
+         stall_threshold = int(self.config["scraping"].get("stall_threshold", 80))
+         batch_size = int(self.config["scraping"]["batch_save_interval"])
+@@ -1686,8 +1924,29 @@ class GoogleMapsScraper:
+         if fast_mode:
+             self.logger.info(f"Fast-scroll mode enabled (target={max_reviews} > 300)")
+ 
++        # Wall-clock watchdog. stall_threshold/stall_cycles above count *scroll
++        # cycles*, which is exactly what a signed-out session's sign-in-modal
++        # click storm defeats: every cycle "completes" in the usual number of
++        # cycles, just each one now takes up to a 30s click timeout instead of
++        # a couple of seconds. This tracks actual elapsed time instead, so a
++        # store that has stopped making progress gets cut loose regardless of
++        # why each cycle is slow.
++        scraping_cfg = self.config["scraping"]
++        no_progress_timeout_s = float(scraping_cfg.get("no_progress_timeout_s", 600))
++        min_rate_window_s = float(scraping_cfg.get("min_rate_window_s", 900))
++        min_rate_reviews = int(scraping_cfg.get("min_rate_reviews", 20))
++        early_stuck_s = float(scraping_cfg.get("early_stuck_s", 180))
++        watchdog_start = last_session_save = time.monotonic()
++        last_new_at = watchdog_start
++
+         try:
+             while total_collected < max_reviews and scroll_attempts < max_scrolls and not self._shutdown:
++                if time.monotonic() - last_session_save >= 600:
++                    await self.save_session()
++                    last_session_save = time.monotonic()
++                await self._dismiss_signin_modal()
++                await self._expand_all_reviews()
++
+                 if await self.check_for_captcha():
+                     # Flush buffer before breaking so no reviews are lost
+                     if store_id and self.db and buffer:
+@@ -1696,6 +1955,7 @@ class GoogleMapsScraper:
+                         total_collected = persisted
+                         self.db.update_store_reviews_count(store_id, persisted)
+                         buffer = []
++                    self.last_stop_reason = "captcha"
+                     self.trigger_global_pause("CAPTCHA during review collection")
+                     break
+ 
+@@ -1704,6 +1964,7 @@ class GoogleMapsScraper:
+                 # container, causing duplicate extraction
+                 visible = await self.page.locator("div[data-review-id]").all()
+                 new_in_cycle = 0
++                loaded_in_cycle = 0
+ 
+                 for el in visible:
+                     if total_collected >= max_reviews:
+@@ -1712,13 +1973,14 @@ class GoogleMapsScraper:
+                     if not rid or rid in seen_ids:
+                         continue
+                     seen_ids.add(rid)
++                    loaded_in_cycle += 1
++                    loaded_total += 1
+                     record = await self._extract_review(el)
+                     if not record:
+                         continue
+ 
+-                    # Skip-list check: if this review is already in master, don't
+-                    # save it but DO count it toward consecutive_known so we can
+-                    # bail out of dense overlap zones
++                    # Skip-list check: a review master already holds is not saved again,
++                    # but scrolling continues past it.
+                     if known_keys:
+                         from .database import DatabaseManager
+                         key = DatabaseManager.make_dedup_key(
+@@ -1727,17 +1989,7 @@ class GoogleMapsScraper:
+                             record.get("review_text"),
+                         )
+                         if key in known_keys:
+-                            consecutive_known += 1
+-                            if consecutive_known >= max_consecutive_known:
+-                                self.logger.info(
+-                                    f"{consecutive_known} consecutive reviews already in master "
+-                                    f"on '{sort_queue[sort_idx]}' — moving to the next sort rung"
+-                                )
+-                                early_stop_dup = True
+-                                break
+                             continue
+-                        # New review (not in master) — reset the counter
+-                        consecutive_known = 0
+ 
+                     new_in_cycle += 1
+                     total_collected += 1
+@@ -1761,11 +2013,6 @@ class GoogleMapsScraper:
+                     else:
+                         in_memory.append(record)
+ 
+-                force_switch = early_stop_dup               # known-review run: next rung, no recovery scroll
+-                if early_stop_dup:
+-                    early_stop_dup = False
+-                    in_warmup = False
+-
+                 # Progress logging every 25 reviews
+                 if total_collected - last_log_count >= 25:
+                     self.logger.info(
+@@ -1774,10 +2021,42 @@ class GoogleMapsScraper:
+                     )
+                     last_log_count = total_collected
+ 
++                # Wall-clock watchdog — applies during warmup too, since a
++                # signed-out session stalls on resume exactly the same way it
++                # stalls on fresh territory.
++                now_mono = time.monotonic()
++                if loaded_in_cycle > 0:
++                    last_new_at = now_mono
++                watchdog_elapsed = now_mono - watchdog_start
++                if now_mono - last_new_at >= no_progress_timeout_s:
++                    self.logger.warning(
++                        f"Watchdog: page loaded no reviews for {no_progress_timeout_s:.0f}s — stopping store")
++                    self.last_stop_reason = "stalled"
++                elif watchdog_elapsed >= min_rate_window_s and loaded_total < min_rate_reviews:
++                    self.logger.warning(
++                        f"Watchdog: page loaded only {loaded_total} reviews after "
++                        f"{min_rate_window_s:.0f}s (min {min_rate_reviews}) — stopping store")
++                    self.last_stop_reason = "stalled"
++                elif (len(existing_ids) <= 5 and loaded_total <= 5
++                      and watchdog_elapsed >= early_stuck_s
++                      and self.last_rungs_applied <= 1):
++                    # Only while sorting is not progressing. Walking all four orders
++                    # takes about four minutes, so applying this unconditionally cut
++                    # healthy passes off on the last order and forced a login swap.
++                    self.logger.warning(
++                        f"Watchdog: {len(existing_ids)} existing + {loaded_total} loaded after "
++                        f"{early_stuck_s:.0f}s — stopping store")
++                    self.last_stop_reason = "stalled"
++                if self.last_stop_reason == "stalled":
++                    reached_end = False
++                    break
++
+                 # During warmup, skip stall counting unless we've scrolled too long
+                 # without ever finding new content (in which case we've over-shot
+                 # the resume zone or there are no more new reviews).
+-                if in_warmup and new_in_cycle == 0:
++                if loaded_in_cycle > 0:
++                    in_warmup = False  # past what the DB already held
++                if in_warmup and loaded_in_cycle == 0:
+                     if scroll_attempts > max_warmup_scrolls:
+                         self.logger.info(
+                             f"Warmup exceeded {max_warmup_scrolls} scrolls without "
+@@ -1785,20 +2064,19 @@ class GoogleMapsScraper:
+                         )
+                         in_warmup = False  # let normal stall handling take over
+                 else:
+-                    stall_cycles = stall_cycles + 1 if new_in_cycle == 0 else 0
++                    stall_cycles = stall_cycles + 1 if loaded_in_cycle == 0 else 0
+                 reached_end = False
+-                if force_switch or (not in_warmup and stall_cycles >= stall_threshold):
++                if not in_warmup and stall_cycles >= stall_threshold:
+                     # Before giving up on this ordering after a stall, try a recovery
+                     # scroll: jump far down + wait to let Google Maps lazy-load more.
+                     recovered = 0
+-                    if not force_switch:
+-                        self.logger.info(f"Stall at {stall_cycles} cycles — attempting recovery scroll")
+-                        await self._scroll_reviews_panel(delta=10000)
+-                        await asyncio.sleep(random.uniform(4.0, 6.0))
+-                        for el in await self.page.locator("div[data-review-id]").all():
+-                            rid = await el.get_attribute("data-review-id")
+-                            if rid and rid not in seen_ids:
+-                                recovered += 1
++                    self.logger.info(f"Stall at {stall_cycles} cycles — attempting recovery scroll")
++                    await self._scroll_reviews_panel(delta=10000)
++                    await asyncio.sleep(random.uniform(4.0, 6.0))
++                    for el in await self.page.locator("div[data-review-id]").all():
++                        rid = await el.get_attribute("data-review-id")
++                        if rid and rid not in seen_ids:
++                            recovered += 1
+                     if recovered > 0:
+                         self.logger.info(f"Recovery found {recovered} new reviews — continuing")
+                         stall_cycles = 0
+@@ -1811,9 +2089,18 @@ class GoogleMapsScraper:
+                     # Skip rungs that do not actually apply. _sort_reviews now
+                     # reports whether the ordering changed, so a missing option
+                     # costs one attempt instead of another 60 empty cycles spent
+-                    # re-reading the ordering we were already in.
++                    # re-reading the ordering we were already in. A menu that
++                    # won't open at all means every remaining rung will fail
++                    # the same way, so stop walking the ladder immediately
++                    # instead of re-trying each one.
+                     while sort_idx < len(sort_queue):
+-                        if await self._sort_reviews(sort_order=sort_queue[sort_idx]):
++                        sort_result = await self._sort_reviews(sort_order=sort_queue[sort_idx])
++                        if sort_result == "applied":
++                            self.last_rungs_applied += 1
++                            break
++                        if sort_result == "menu_unavailable":
++                            self.logger.warning("Sort menu unavailable — skipping remaining sort rungs")
++                            sort_idx = len(sort_queue)
+                             break
+                         self.logger.info(
+                             f"Sort '{sort_queue[sort_idx]}' did not apply — skipping that rung")
+@@ -1828,7 +2115,6 @@ class GoogleMapsScraper:
+                             self.db.update_store_resume_state(store_id, sort_order=next_sort)
+                         # Reset progress trackers for the new sort order
+                         stall_cycles = 0
+-                        consecutive_known = 0
+                         last_log_count = total_collected
+                         # Scroll back near the top of the panel so the new ordering takes effect
+                         try:
+@@ -1843,8 +2129,16 @@ class GoogleMapsScraper:
+                         await asyncio.sleep(random.uniform(2.0, 4.0))
+                         continue
+ 
++                    # Few reviews held and few found only means "stuck" when sorting did
++                    # not work; four orders walked signed in is a real ceiling.
++                    self.last_stop_reason = (
++                        "stalled" if (len(existing_ids) <= 5 and loaded_total <= 5
++                                      and self.last_rungs_applied < 3)
++                        else "exhausted"
++                    )
+                     self.logger.info(
+-                        f"All sort orders exhausted — stopping at {total_collected} reviews"
++                        f"All sort orders exhausted — stopping at {total_collected} reviews "
++                        f"(reason={self.last_stop_reason})"
+                     )
+                     reached_end = True
+                     break
+@@ -1944,7 +2238,7 @@ class GoogleMapsScraper:
+             return []
+         business = await self.extract_business_info()
+         live = int(business.get("total_reviews") or 0)
+-        target = min(1500, max(max_reviews, live if live > 0 else max_reviews))
++        target = min(int(self.config["scraping"]["max_reviews_per_store"]), max(max_reviews, live if live > 0 else max_reviews))
+         self.logger.info(f"Query mode target: {target} reviews (live={live}, requested={max_reviews})")
+         reviews, _reached_end = await self._collect_reviews(target_count=target, store_id=None)
+         return reviews
+@@ -1993,27 +2287,19 @@ class GoogleMapsScraper:
+         # Extract business info
+         business = await self.extract_business_info()
+         live = int(business.get("total_reviews") or 0)
+-        target = min(1500, max(max_reviews, live if live > 0 else max_reviews))
++        target = min(int(self.config["scraping"]["max_reviews_per_store"]), max(max_reviews, live if live > 0 else max_reviews))
+         self.logger.info(f"URL mode target: {target} reviews (live={live}, requested={max_reviews})")
+ 
+         # Click reviews tab and collect
+         reviews, _reached_end = await self._collect_reviews(target_count=target, store_id=None)
+         return business, reviews
+ 
+-    def _batch_review_cap(self) -> int:
+-        """1,500 unless the batch's metadata lifts it (r09 --cap 0). A bad value never means 'no cap'."""
+-        try:
+-            return review_cap(self.db.get_metadata("review_cap")) if self.db else DEFAULT_CAP
+-        except Exception:                      # an older batch with no metadata table
+-            return DEFAULT_CAP
+-
+     async def scrape_single_store(self, store: Any) -> str:
+         store_id = store["store_id"]
+         master_reviews = int(store.get("master_reviews") or 0)
+         raw_target = int(store.get("target_reviews") or 1000)
+-        cap = self._batch_review_cap()
+-        self.config["scraping"]["max_reviews_per_store"] = cap     # _collect_reviews reads this
+-        target_reviews = min(cap, raw_target)
++        review_cap = int(self.config["scraping"]["max_reviews_per_store"])
++        target_reviews = min(review_cap, raw_target)
+         store_type = "incomplete" if master_reviews > 0 else "fresh"
+ 
+         await self.wait_if_paused()
+@@ -2026,7 +2312,7 @@ class GoogleMapsScraper:
+         # Effective target: how many MORE reviews this machine needs to collect
+         effective_target = max(target_reviews - master_reviews, 0)
+         self.logger.info(
+-            f"[{store_type.upper()}] target={target_reviews} (raw={raw_target}, cap={cap}), "
++            f"[{store_type.upper()}] target={target_reviews} (raw={raw_target}, cap={review_cap}), "
+             f"master={master_reviews}, effective_target={effective_target}"
+         )
+ 
+@@ -2064,6 +2350,16 @@ class GoogleMapsScraper:
+                 self.db.update_store_live_review_count(store_id, live_count)
+                 self.logger.info(f"Live Google review count: {live_count}")
+ 
++            # Go for every review Google lists, not the stored target. The stored target
++            # is usually a little under the live count, and that gap was being left behind.
++            if (self.config["scraping"].get("target_all_live") and live_count > target_reviews
++                    and live_count > 5):
++                target_reviews = min(review_cap, live_count)
++                effective_target = max(target_reviews - master_reviews, 0)
++                self.logger.info(
++                    f"Going for all reviews: target raised to the live count {target_reviews} "
++                    f"(need {effective_target})")
++
+             # Guard against limited-view pages that incorrectly show ~4 reviews
+             # for high-target stores. This usually means the session is degraded.
+             limited_view_suspected = (
+@@ -2143,10 +2439,42 @@ class GoogleMapsScraper:
+             sort_order = strategy.SORT_LADDER[0]
+             self.logger.info(f"Attempt {attempt}: ladder={strategy.SORT_LADDER}, scrape_target={scrape_target}")
+ 
+-            was_interrupted = str(store.get("status") or "") == "in_progress"
++            # claim_next_store re-reads the row after setting status='in_progress', so
++            # the status can never say whether the previous run was interrupted. It
++            # used to be tested here, which made every retry start on the saved last
++            # rung ("highest") and stop after a few scrolls. Interrupted stores are
++            # reset to pending at startup and just restart from Newest; the dedup
++            # guard keeps already-saved reviews from being collected twice.
++            was_interrupted = False
+             collected, reached_end = await self.scrape_reviews(
+                 store_id=store_id, target_count=scrape_target,
+                 sort_order=sort_order, resuming=was_interrupted)
++
++            # A "stalled" store didn't run out of reviews — it ran into a
++            # signed-out session or a genuinely stuck page. One clean session
++            # swap (fresh browser, next account) gives it a real second look
++            # before the retry ladder in scrape_single_store gets involved,
++            # rather than spending a whole attempt on a session we already
++            # know is broken.
++            swaps_remaining = int(self.config["scraping"].get("session_swaps_per_store", 1))
++            while self.last_stop_reason == "stalled" and swaps_remaining > 0:
++                swaps_remaining -= 1
++                old_auth = os.path.basename(self.current_auth_file) if self.current_auth_file else "none"
++                await self.close_browser()
++                await asyncio.sleep(random.uniform(5.0, 10.0))
++                clear_tracking = bool(self.config["scraping"].get("clear_tracking_cookies_on_swap", False))
++                await self.start_browser(fresh_cookies=clear_tracking)
++                new_auth = os.path.basename(self.current_auth_file) if self.current_auth_file else "none"
++                self.logger.warning(
++                    f"Stalled — rotated auth {old_auth} → {new_auth}, fresh browser; retrying store")
++                if not await self.navigate_to_store(store):
++                    break
++                if await self.check_and_handle_blocks():
++                    return "interrupted"
++                collected, reached_end = await self.scrape_reviews(
++                    store_id=store_id, target_count=scrape_target,
++                    sort_order=sort_order, resuming=True)
++
+             if self.db:
+                 final_count = self.db.get_review_count(store_id)
+                 total_reviews = master_reviews + final_count
+@@ -2161,6 +2489,23 @@ class GoogleMapsScraper:
+                         f"= {total_reviews}/{target_reviews} (live={live_count}, reached_end={reached_end})"
+                     )
+                     return "completed"
++                elif (gained <= 10 and not self.signed_out and reached_end
++                      and self.last_stop_reason == "exhausted" and self.last_rungs_applied >= 3):
++                    # Every sort order was walked while signed in and the whole walk
++                    # produced 10 or fewer reviews we did not hold. Google's live count includes ratings it
++                    # never lists, so held < live is the ceiling, not a failure.
++                    # Retrying repeats the same walk: a whole retry round added 1
++                    # review in 2 hours.
++                    self.db.mark_store_completed(store_id, final_count)
++                    cur = self.db.conn.cursor()
++                    cur.execute("UPDATE stores SET error_message=? WHERE store_id=?",
++                                (f"Ceiling: {self.last_rungs_applied} sort orders exhausted, +{gained} new "
++                                 f"({total_reviews} held of live {live_count})", store_id))
++                    self.db.conn.commit()
++                    self.logger.info(
++                        f"Store completed at ceiling [{store_type}]: {total_reviews} held, live={live_count}; "
++                        f"{self.last_rungs_applied} sort orders exhausted, +{gained} new")
++                    return "completed"
+                 elif result == strategy.PROGRESSED:
+                     # Progress, not failure.
+                     #
+diff --git a/Scraper_v2/linux_scraper/strategy.py b/Archive/manabe_box_code_20261024/linux_scraper/strategy.py
+index 43982d2..ca1c437 100644
+--- a/Scraper_v2/linux_scraper/strategy.py
++++ b/Archive/manabe_box_code_20261024/linux_scraper/strategy.py
+@@ -2,8 +2,7 @@
+ Per-store scraping decisions, kept apart from the browser code so they can be tested.
+ 
+ Sort ladder
+-    Every store starts on Newest. When the panel starts returning reviews we already
+-    hold (a run of KNOWN_RUN_SWITCH in a row) or stops producing new ones for
++    Every store starts on Newest. When the panel stops loading reviews for
+     STALL_SWITCH scroll cycles, the scraper moves to the next rung instead of stopping:
+     Newest -> Most relevant (Google's default) -> Lowest rating -> Highest rating.
+     Google Maps offers exactly these four orderings; there is no "oldest", so the two
+@@ -18,7 +17,6 @@ Completion
+ from __future__ import annotations
+ 
+ SORT_LADDER = ["newest", "relevant", "lowest", "highest"]
+-KNOWN_RUN_SWITCH = 40      # consecutive reviews we already hold -> next rung
+ STALL_SWITCH = 60          # scroll cycles with nothing new -> next rung
+ 
+ COMPLETED, PROGRESSED, FAILED = "completed", "progressed", "failed"
+@@ -46,8 +44,8 @@ def sort_ladder(resume_from: str | None = None) -> list[str]:
+     return list(SORT_LADDER)
+ 
+ 
+-def should_switch_sort(known_run: int, stall_cycles: int) -> bool:
+-    return known_run >= KNOWN_RUN_SWITCH or stall_cycles >= STALL_SWITCH
++def should_switch_sort(stall_cycles: int) -> bool:
++    return stall_cycles >= STALL_SWITCH
+ 
+ 
+ def _live_trusted(live: int, limited_view: bool) -> bool:
+diff --git a/Scraper_v2/linux_scraper/worker.py b/Archive/manabe_box_code_20261024/linux_scraper/worker.py
+index 3144c7a..07a625b 100644
+--- a/Scraper_v2/linux_scraper/worker.py
++++ b/Archive/manabe_box_code_20261024/linux_scraper/worker.py
+@@ -16,7 +16,6 @@ import threading
+ from .auth_manager import AuthAccountManager
+ from .config import load_config
+ from .database import make_db
+-from .review_cap import review_cap, store_timeout_minutes
+ 
+ 
+ def _setup_logging(config: dict, db_path: str = "") -> None:
+@@ -69,9 +68,6 @@ def run_single(
+         if reset_failed:
+             logger.info(f"Reset {reset_failed} failed stores for retry")
+ 
+-    db = make_db(db_path)
+-    db.connect()
+-
+     if auth_files is None:
+         auth_files = []
+ 
+@@ -79,19 +75,27 @@ def run_single(
+ 
+     from .scraper import GoogleMapsScraper
+ 
+-    scraper = GoogleMapsScraper(
+-        config=config,
+-        db=db,
+-        worker_id=1,
+-        auth_manager=auth_manager,
+-        machine_id=machine_id,
+-    )
+-
+     max_retries = int(config["retry"]["max_retries"])
+-
+-    async def loop() -> None:
++    n_workers = max(1, int(config.get("workers", {}).get("count", 1)))
++    stagger_s = float(config.get("workers", {}).get("stagger_s", 45))
++
++    async def loop(worker_id: int) -> None:
++        # Each worker owns its DB connection and browser; claim_next_store's
++        # BEGIN IMMEDIATE keeps two workers from claiming the same store.
++        db = make_db(db_path)
++        db.connect()
++        scraper = GoogleMapsScraper(
++            config=config,
++            db=db,
++            worker_id=worker_id,
++            auth_manager=auth_manager,
++            machine_id=machine_id,
++        )
++        logger = scraper.logger
+         processed = 0
+         consecutive_crashes = 0
++        if worker_id > 1:
++            await asyncio.sleep(stagger_s * (worker_id - 1))
+ 
+         try:
+             while not stop_event.is_set():
+@@ -99,7 +103,7 @@ def run_single(
+                 store = None
+                 for _ in range(5):
+                     try:
+-                        store = db.claim_next_store(worker_id=1, max_retries=max_retries)
++                        store = db.claim_next_store(worker_id=worker_id, max_retries=max_retries)
+                         break
+                     except sqlite3.OperationalError as e:
+                         if "locked" in str(e).lower():
+@@ -119,15 +123,13 @@ def run_single(
+                 master_rev = int(store.get("master_reviews") or 0)
+                 target_rev = int(store.get("target_reviews") or 0)
+                 store_type = "INCOMPLETE" if master_rev > 0 else "FRESH"
+-                try:
+-                    cap = review_cap(db.get_metadata("review_cap"))
+-                except Exception:              # an older batch with no metadata table
+-                    cap = review_cap(None)
++                cap = int(config["scraping"]["max_reviews_per_store"])
+                 effective = max(min(cap, target_rev) - master_rev, 0)
+-                # Per-store budget: 60-minute floor (so even tiny stores get full
+-                # browser-warmup + sort-switching headroom), scaling up to a
+-                # 180-minute ceiling for huge stores (8 hours when the batch lifts the cap).
+-                timeout_min = store_timeout_minutes(effective, cap)
++                # Backstop only: the watchdog in _collect_reviews ends stores whose page
++                # stops loading reviews. 30 minutes plus one per 15 of the store's target
++                # (not of the reviews still needed: a store holding 1,300 of 1,500 still
++                # has to be scrolled past all 1,300), with no ceiling.
++                timeout_min = 30 + min(cap, target_rev) // 15
+                 timeout_sec = float(timeout_min * 60)
+ 
+                 logger.info(f"Starting browser for store {store_id}...")
+@@ -159,7 +161,7 @@ def run_single(
+                     processed += 1
+                     # Force-kill browser — graceful close may hang after timeout
+                     try:
+-                        await asyncio.wait_for(scraper.close_browser(), timeout=5.0)
++                        await asyncio.wait_for(scraper.close_browser(), timeout=15.0)
+                     except Exception:
+                         scraper.browser = None
+                         scraper.context = None
+@@ -207,8 +209,12 @@ def run_single(
+                 await scraper.close_browser()
+             except Exception:
+                 pass
+-            db.release_worker_stores(1)
++            db.release_worker_stores(worker_id)
+             db.close()
+-            logger.info(f"Worker finished. Processed {processed} stores.")
++            logger.info(f"Worker {worker_id} finished. Processed {processed} stores.")
++
++    async def run_all() -> None:
++        logging.getLogger("worker").info(f"Starting {n_workers} parallel worker(s), stagger {stagger_s:.0f}s")
++        await asyncio.gather(*(loop(w) for w in range(1, n_workers + 1)))
+ 
+-    asyncio.run(loop())
++    asyncio.run(run_all())

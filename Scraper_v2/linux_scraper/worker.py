@@ -16,6 +16,7 @@ import threading
 from .auth_manager import AuthAccountManager
 from .config import load_config
 from .database import make_db
+from .review_cap import review_cap, store_timeout_minutes
 
 
 def _setup_logging(config: dict, db_path: str = "") -> None:
@@ -118,11 +119,15 @@ def run_single(
                 master_rev = int(store.get("master_reviews") or 0)
                 target_rev = int(store.get("target_reviews") or 0)
                 store_type = "INCOMPLETE" if master_rev > 0 else "FRESH"
-                effective = max(min(1500, target_rev) - master_rev, 0)
+                try:
+                    cap = review_cap(db.get_metadata("review_cap"))
+                except Exception:              # an older batch with no metadata table
+                    cap = review_cap(None)
+                effective = max(min(cap, target_rev) - master_rev, 0)
                 # Per-store budget: 60-minute floor (so even tiny stores get full
                 # browser-warmup + sort-switching headroom), scaling up to a
-                # 180-minute ceiling for huge stores. 2 seconds per review needed.
-                timeout_min = min(180, 60 + effective * 2)
+                # 180-minute ceiling for huge stores (8 hours when the batch lifts the cap).
+                timeout_min = store_timeout_minutes(effective, cap)
                 timeout_sec = float(timeout_min * 60)
 
                 logger.info(f"Starting browser for store {store_id}...")
@@ -130,7 +135,7 @@ def run_single(
 
                 logger.info(
                     f"Scraping [{store_type}]: {store_name} "
-                    f"(target={target_rev}, capped={min(1500, target_rev)}, master={master_rev}, "
+                    f"(target={target_rev}, capped={min(cap, target_rev)}, master={master_rev}, "
                     f"need={effective}, timeout={timeout_sec:.0f}s)"
                 )
 
@@ -140,7 +145,11 @@ def run_single(
                         timeout=timeout_sec,
                     )
                     processed += 1
-                    if status in ("completed", "skipped"):
+                    # "progressed" is a clean outcome: the store advanced and was
+                    # requeued for another pass. Treating it as a crash would trip
+                    # the circuit breaker during exactly the workload the scraper
+                    # is built for, a long run over large listings.
+                    if status in ("completed", "skipped", "progressed"):
                         consecutive_crashes = 0  # only reset on clean outcomes
 
                 except asyncio.TimeoutError:

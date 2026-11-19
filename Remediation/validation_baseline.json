@@ -1,0 +1,1216 @@
+{
+  "master": "C:\\Users\\19193\\Downloads Local\\School\\ISE495_SP26\\Gmaps Scraper\\Data\\Step_5_master_reviews.db",
+  "generated": "2026-09-05T09:54:55",
+  "checks": [
+    {
+      "name": "orphan reviews",
+      "severity": "BLOCKER",
+      "note": "A review must always name a store that exists.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "duplicate place_id",
+      "severity": "BLOCKER",
+      "note": "place_id is the only stable store identity; duplicates split a store's reviews.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "stores with no place_id",
+      "severity": "HIGH",
+      "note": "A store with no identifier can never be re-visited or refreshed.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "non-standard place_id",
+      "severity": "HIGH",
+      "note": "Not re-scrapable. Documented as 67 open in the quality report.",
+      "value": 67,
+      "status": "HIGH"
+    },
+    {
+      "name": "reviews_scraped disagrees with actual count",
+      "severity": "BLOCKER",
+      "note": "The stored counter drives scheduling. If it lies, the queue is fiction.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "scrape_status disagrees with the counts",
+      "severity": "MED",
+      "note": "Stale column. The canonical test is reviews_scraped >= target_reviews.",
+      "value": 661,
+      "status": "MED"
+    },
+    {
+      "name": "over-scrape, all classes",
+      "severity": "MED",
+      "note": "Umbrella count. See the three classified checks below for what to do.",
+      "value": 157,
+      "status": "MED"
+    },
+    {
+      "name": "over-scrape class A: stale target",
+      "severity": "MED",
+      "note": "Target came from stale source metadata, so best-effort mode correctly trusted Google's live count. The reviews are fine; the TARGET is wrong. Fix by back-filling target, not by touching reviews.",
+      "value": 107,
+      "status": "MED"
+    },
+    {
+      "name": "over-scrape class B: double scrape",
+      "severity": "HIGH",
+      "note": "Store was claimed and scraped twice inside one batch. Google's review ids are not stable between sessions, so the second pass looked new and both copies were kept. Fix by exact-duplicate deletion.",
+      "value": 10,
+      "status": "HIGH"
+    },
+    {
+      "name": "over-scrape class C: wrong location",
+      "severity": "BLOCKER",
+      "note": "A trustworthy target and a large multiple of it. This is the genuine chain-poisoning signature and the only class that needs a human to open the place_id on Google and adjudicate.",
+      "value": 9,
+      "status": "BLOCKER"
+    },
+    {
+      "name": "stores with no target",
+      "severity": "HIGH",
+      "note": "Completion is undefined for these; they are excluded from every fill-rate.",
+      "value": 157,
+      "status": "HIGH"
+    },
+    {
+      "name": "stores with reviews but no target",
+      "severity": "HIGH",
+      "note": "Scraped without a completion criterion.",
+      "value": 5,
+      "status": "HIGH"
+    },
+    {
+      "name": "incomplete stores",
+      "severity": "HIGH",
+      "note": "The authoritative bar is >=99% of stores within 1 review of target.",
+      "value": 1235,
+      "status": "HIGH"
+    },
+    {
+      "name": "stores never started",
+      "severity": "HIGH",
+      "note": "Zero reviews collected.",
+      "value": 197,
+      "status": "HIGH"
+    },
+    {
+      "name": "marked complete while holding zero reviews",
+      "severity": "BLOCKER",
+      "note": "Locked out of every future batch: exports select only pending and incomplete, and no code path ever demotes a complete store.",
+      "value": 158,
+      "status": "BLOCKER"
+    },
+    {
+      "name": "target sitting exactly on the 1,500 cap",
+      "severity": "MED",
+      "note": "The target itself was capped, so the completion denominator is truncated. The true number of reviews these stores have was never recorded and cannot be recovered from this database.",
+      "value": 315,
+      "status": "MED"
+    },
+    {
+      "name": "stores truncated at the cap",
+      "severity": "MED",
+      "note": "A store at the cap is truncated by our own policy, not complete. It must be labelled as censored data for any per-store analysis.",
+      "value": 96,
+      "status": "MED"
+    },
+    {
+      "name": "stores outside North Carolina",
+      "severity": "BLOCKER",
+      "note": "Scope is North Carolina only.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "coordinates outside the NC bounding box",
+      "severity": "HIGH",
+      "note": "Either a bad geocode or a store that is not in NC.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "stores with no city",
+      "severity": "MED",
+      "note": "",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "stores with no category",
+      "severity": "HIGH",
+      "note": "Cannot participate in category-stratified analysis.",
+      "value": 55,
+      "status": "HIGH"
+    },
+    {
+      "name": "within-store duplicate reviews (50-char key)",
+      "severity": "MED",
+      "note": "Survived the merge dedup key.",
+      "value": 734,
+      "status": "MED"
+    },
+    {
+      "name": "exact duplicate reviews (full text)",
+      "severity": "HIGH",
+      "note": "Byte-identical rows. Unambiguously duplicates, safe to collapse.",
+      "value": 727,
+      "status": "HIGH"
+    },
+    {
+      "name": "reviews with an out-of-range rating",
+      "severity": "BLOCKER",
+      "note": "",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "reviews with no rating",
+      "severity": "MED",
+      "note": "Rating extraction failed for these rows.",
+      "value": 569,
+      "status": "MED"
+    },
+    {
+      "name": "reviews with no date",
+      "severity": "MED",
+      "note": "",
+      "value": 568,
+      "status": "MED"
+    },
+    {
+      "name": "review text containing mojibake",
+      "severity": "HIGH",
+      "note": "UTF-8 decoded as Latin-1. Corrupts non-English store and reviewer names.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "review text containing a null byte",
+      "severity": "HIGH",
+      "note": "",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "review text ending in Google's See-more marker",
+      "severity": "INFO",
+      "note": "Candidate clipping from a See-more expansion that did not fire. Reviews ending in a typed ellipsis are NOT counted here: a trailing U+2026 is overwhelmingly the reviewer's own punctuation after an emoji, and cannot be told apart from clipping using stored text alone.",
+      "value": 6,
+      "status": "INFO"
+    },
+    {
+      "name": "helpful_count never populated",
+      "severity": "HIGH",
+      "note": "A field that is uniformly zero across 1.2M rows is an extraction failure, not a measurement. Selector is case-sensitive and never matches.",
+      "value": 1,
+      "status": "HIGH"
+    },
+    {
+      "name": "photo_count never populated",
+      "severity": "HIGH",
+      "note": "locator().count() returns 0 for a non-matching selector and never raises, so the failure is invisible.",
+      "value": 1,
+      "status": "HIGH"
+    },
+    {
+      "name": "service_type never populated",
+      "severity": "HIGH",
+      "note": "Dead column.",
+      "value": 1,
+      "status": "HIGH"
+    },
+    {
+      "name": "reviews with no source_db",
+      "severity": "HIGH",
+      "note": "Provenance is the difference between a dataset and a pile of scraped HTML.",
+      "value": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "stores far from their own address",
+      "severity": "BLOCKER",
+      "value": 106,
+      "status": "BLOCKER",
+      "note": "reviews affected: 30367"
+    },
+    {
+      "name": "store pairs sharing 20+ identical reviews",
+      "severity": "BLOCKER",
+      "value": 42,
+      "status": "BLOCKER",
+      "note": "49 stores involved"
+    }
+  ],
+  "counts": {
+    "stores": 4889,
+    "reviews": 1201237,
+    "reviews_with_text": 607935,
+    "cities": 578,
+    "capped_fill_pct": 84.35,
+    "reviews_remaining": 215457
+  },
+  "geo_inconsistent": [
+    {
+      "store_id": 3890,
+      "store_name": "Stop N Shop",
+      "source_city": "Morganton",
+      "address": "100 S Virginia Dare Trail, Kill Devil Hills, NC 27948",
+      "km_off": 541.7,
+      "reviews": 223,
+      "place_id": "ChIJ0wQiUHDhpIkRR_qM47_Jju0"
+    },
+    {
+      "store_id": 4169,
+      "store_name": "El Torito Mexican Store & Restaurant",
+      "source_city": "Asheville",
+      "address": "3759 W Wilson St, Farmville, NC 27828",
+      "km_off": 451.2,
+      "reviews": 74,
+      "place_id": "ChIJXREGesC_rokR_dXePWQNIdc"
+    },
+    {
+      "store_id": 2678,
+      "store_name": "Family Dollar",
+      "source_city": "Bryson City",
+      "address": "3229 Avent Ferry Rd, Raleigh, NC 27606",
+      "km_off": 430.0,
+      "reviews": 82,
+      "place_id": "ChIJ4ZD4VgH1rIkRAickNRwh6MA"
+    },
+    {
+      "store_id": 2526,
+      "store_name": "Dollar General",
+      "source_city": "Sapphire",
+      "address": "3628 Benson Rd, Garner, NC 27529",
+      "km_off": 403.1,
+      "reviews": 402,
+      "place_id": "ChIJ2QI8uNRjrIkRPOWAWUt7ZHE"
+    },
+    {
+      "store_id": 2661,
+      "store_name": "Dollar Tree",
+      "source_city": "Clyde",
+      "address": "2233 Avent Ferry Rd Ste 113, Raleigh, NC 27606",
+      "km_off": 384.1,
+      "reviews": 199,
+      "place_id": "ChIJWVB_bpn1rIkRnG6dJCgiVeU"
+    },
+    {
+      "store_id": 1663,
+      "store_name": "Spot",
+      "source_city": "Asheville",
+      "address": "1910 Poole Rd, Raleigh, NC 27610",
+      "km_off": 356.7,
+      "reviews": 3,
+      "place_id": "ChIJYykKmOJerIkRHfRykIJkhqc"
+    },
+    {
+      "store_id": 18,
+      "store_name": "Grand Asia Market",
+      "source_city": "Fletcher",
+      "address": "1253 Buck Jones Rd, Raleigh, NC 27606",
+      "km_off": 345.7,
+      "reviews": 1432,
+      "place_id": "ChIJ_0njz4T0rIkRw6wgW_JIJi0"
+    },
+    {
+      "store_id": 1649,
+      "store_name": "Sonny's",
+      "source_city": "Fletcher",
+      "address": "105 N Raleigh St, Angier, NC 27501",
+      "km_off": 341.7,
+      "reviews": 15,
+      "place_id": "ChIJl5bxkISGrIkRufhTArvVRI4"
+    },
+    {
+      "store_id": 3288,
+      "store_name": "Food Lion",
+      "source_city": "Raleigh",
+      "address": "2720 Lake Wheeler Rd #111, Raleigh, NC 27603",
+      "km_off": 340.0,
+      "reviews": 668,
+      "place_id": "ChIJF2bmqzj1rIkRjCW_OEvhe1Y"
+    },
+    {
+      "store_id": 4451,
+      "store_name": "Sam's Club",
+      "source_city": "Hendersonville",
+      "address": "2537 S Saunders St, Raleigh, NC 27603",
+      "km_off": 329.1,
+      "reviews": 1062,
+      "place_id": "ChIJb09e641frIkRll2E8JC5xUw"
+    },
+    {
+      "store_id": 558,
+      "store_name": "Circle K",
+      "source_city": "Spruce Pine",
+      "address": "4100 Western Blvd, Raleigh, NC 27606",
+      "km_off": 302.4,
+      "reviews": 56,
+      "place_id": "ChIJSStbtrH1rIkRLkt1YIdNi_c"
+    },
+    {
+      "store_id": 2444,
+      "store_name": "Dollar General",
+      "source_city": "Newland",
+      "address": "832 E Chatham St, Cary, NC 27511",
+      "km_off": 293.9,
+      "reviews": 466,
+      "place_id": "ChIJtR0cOxyZJhUR2ToyBYMBkGQ"
+    },
+    {
+      "store_id": 300,
+      "store_name": "Carlton's Tanglewood",
+      "source_city": "Richlands",
+      "address": "4060 Clemmons Rd, Clemmons, NC 27012",
+      "km_off": 288.1,
+      "reviews": 128,
+      "place_id": "ChIJ-1bP-LG5U4gRrB6LL9YBUQg"
+    },
+    {
+      "store_id": 602,
+      "store_name": "Community Store & Sports Bar",
+      "source_city": "Ocracoke",
+      "address": "3445 Corinth Rd A, Moncure, NC 27559",
+      "km_off": 284.4,
+      "reviews": 30,
+      "place_id": "ChIJ5V8Fy6WirIkRR9MAunIDD9g"
+    },
+    {
+      "store_id": 2758,
+      "store_name": "Family Dollar",
+      "source_city": "Newland",
+      "address": "3210 S Wilmington St, Chapanoke Rd, Raleigh, NC 27603",
+      "km_off": 282.3,
+      "reviews": 34,
+      "place_id": "ChIJRRM4TPdfrIkRPRyD-7bsBY0"
+    },
+    {
+      "store_id": 1677,
+      "store_name": "Stop & Quick",
+      "source_city": "Shelby",
+      "address": "1321 S Blount St, Raleigh, NC 27601",
+      "km_off": 274.7,
+      "reviews": 17,
+      "place_id": "ChIJiwjJA59frIkR_ZppWTv1AV8"
+    },
+    {
+      "store_id": 1216,
+      "store_name": "Mulberry Market",
+      "source_city": "Goldsboro",
+      "address": "3215 Queen City Dr, Charlotte, NC 28208",
+      "km_off": 263.8,
+      "reviews": 12,
+      "place_id": "ChIJb2y_HtSjVogRzuAD9ImLZGs"
+    },
+    {
+      "store_id": 1861,
+      "store_name": "Yaya Mini Mart",
+      "source_city": "Kannapolis",
+      "address": "28595 NC-210, Currie, NC 28435",
+      "km_off": 259.0,
+      "reviews": 15,
+      "place_id": "ChIJLX_WPPovqokRfFnBfFvGhDA"
+    },
+    {
+      "store_id": 3625,
+      "store_name": "Lidl",
+      "source_city": "Shelby",
+      "address": "1105 N Harrison Ave, Cary, NC 27513",
+      "km_off": 256.1,
+      "reviews": 689,
+      "place_id": "ChIJu6RfRPjzrIkR4U4WM33dB-E"
+    },
+    {
+      "store_id": 1844,
+      "store_name": "Williams Convenience Mart",
+      "source_city": "Orrum",
+      "address": "327 State Rd 1301, Littleton, NC 27850",
+      "km_off": 245.0,
+      "reviews": 2,
+      "place_id": "ChIJe4y0JvQJrokRfL0NoU3ZUAw"
+    },
+    {
+      "store_id": 3072,
+      "store_name": "Farmers Fresh",
+      "source_city": "Elizabeth City",
+      "address": "1225 Farmers Market Dr, Raleigh, NC 27603",
+      "km_off": 241.2,
+      "reviews": 9,
+      "place_id": "ChIJPWYmo3v1rIkRbNDRaWoMgNw"
+    },
+    {
+      "store_id": 3054,
+      "store_name": "El Ranchito",
+      "source_city": "Gastonia",
+      "address": "3110 New Bern Ave # 112, Raleigh, NC 27610",
+      "km_off": 241.0,
+      "reviews": 275,
+      "place_id": "ChIJDSE1ML9erIkRm7QmaccSzww"
+    },
+    {
+      "store_id": 2959,
+      "store_name": "Carlie C's IGA",
+      "source_city": "Dallas",
+      "address": "4111 New Bern Ave, Raleigh, NC 27610",
+      "km_off": 239.7,
+      "reviews": 1165,
+      "place_id": "ChIJ8XR3c6perIkRiZ4PAwlUm5A"
+    },
+    {
+      "store_id": 1794,
+      "store_name": "Twins Grocery",
+      "source_city": "Gastonia",
+      "address": "708 E Martin St, Raleigh, NC 27601",
+      "km_off": 238.2,
+      "reviews": 5,
+      "place_id": "ChIJLVmtGw5frIkRC_X7VYm_uro"
+    },
+    {
+      "store_id": 1899,
+      "store_name": "Target",
+      "source_city": "Newton",
+      "address": "2512 Hillsborough St, Raleigh, NC 27607",
+      "km_off": 237.8,
+      "reviews": 401,
+      "place_id": "ChIJedErepL1rIkR7tvT94ci0Pk"
+    },
+    {
+      "store_id": 1251,
+      "store_name": "Oakley Food Center",
+      "source_city": "Walnut Cove",
+      "address": "764 Fairview Rd, Asheville, NC 28803",
+      "km_off": 229.4,
+      "reviews": 17,
+      "place_id": "ChIJQ5gLyaXzWYgRPiAkCcNneuw"
+    },
+    {
+      "store_id": 3421,
+      "store_name": "Golden Hex European Food Market",
+      "source_city": "Hickory",
+      "address": "1200 NW Maynard Rd, Cary, NC 27513",
+      "km_off": 228.5,
+      "reviews": 487,
+      "place_id": "ChIJtRpi0FjyrIkRuAnbtYI5p60"
+    },
+    {
+      "store_id": 3684,
+      "store_name": "Lowes Foods on Tryon Road",
+      "source_city": "Gastonia",
+      "address": "6430 Tryon Rd, Cary, NC 27513",
+      "km_off": 222.2,
+      "reviews": 665,
+      "place_id": "ChIJyycyM2PyrIkROH7HLF7vC3I"
+    },
+    {
+      "store_id": 4119,
+      "store_name": "Project LeanNation North Raleigh",
+      "source_city": "Charlotte",
+      "address": "8801 Lead Mine Rd #111, Raleigh, NC 27615",
+      "km_off": 212.1,
+      "reviews": 81,
+      "place_id": "ChIJA3m5aqD5rIkRuNvVgYLV4HE"
+    },
+    {
+      "store_id": 2852,
+      "store_name": "Prices Creek General Store",
+      "source_city": "Polkton",
+      "address": "1331 Cane River School Rd, Burnsville, NC 28714",
+      "km_off": 205.7,
+      "reviews": 723,
+      "place_id": "ChIJ4VWtlCIOWogRimqtmAsoHgc"
+    },
+    {
+      "store_id": 1710,
+      "store_name": "Talley Market",
+      "source_city": "Charlotte",
+      "address": "Main Level, Talley Student Union, 2610 Cates Ave, Raleigh, NC 27606",
+      "km_off": 203.1,
+      "reviews": 24,
+      "place_id": "ChIJRweSB5H1rIkRZveyQhdEIfI"
+    },
+    {
+      "store_id": 3941,
+      "store_name": "Tienda Latina Emanuel",
+      "source_city": "Winston-Salem",
+      "address": "3020 E Elizabethtown Rd, Lumberton, NC 28358",
+      "km_off": 201.6,
+      "reviews": 64,
+      "place_id": "ChIJffwE_dDgqokRHo5rF49alrQ"
+    },
+    {
+      "store_id": 4443,
+      "store_name": "BJ's Wholesale Club",
+      "source_city": "Mooresville",
+      "address": "2370 Walnut St, Cary, NC 27511",
+      "km_off": 190.1,
+      "reviews": 323,
+      "place_id": "ChIJP274GKL0rIkR87cWnoFY7_g"
+    },
+    {
+      "store_id": 1929,
+      "store_name": "Walmart Supercenter",
+      "source_city": "Charlotte",
+      "address": "4500 Fayetteville Rd, Raleigh, NC 27603",
+      "km_off": 189.0,
+      "reviews": 1500,
+      "place_id": "ChIJn_H-mQBgrIkRKmxQmMGvHxo"
+    },
+    {
+      "store_id": 1159,
+      "store_name": "Midway Mart",
+      "source_city": "Rockingham",
+      "address": "8176 US-258, Pink Hill, NC 28572",
+      "km_off": 188.1,
+      "reviews": 17,
+      "place_id": "ChIJYzpSc2JHqYkR1aRvZlKxRFc"
+    },
+    {
+      "store_id": 895,
+      "store_name": "Hamlet Foodmart",
+      "source_city": "Semora",
+      "address": "500 King St, Hamlet, NC 28345",
+      "km_off": 186.2,
+      "reviews": 7,
+      "place_id": "ChIJOXtnVFbcVIgRPMrWVTeCrOM"
+    },
+    {
+      "store_id": 4170,
+      "store_name": "El Toro Supermarket",
+      "source_city": "Cornelius",
+      "address": "3609 Junction Blvd, Raleigh, NC 27603",
+      "km_off": 184.8,
+      "reviews": 688,
+      "place_id": "ChIJUTXc_lX1rIkRS0ljAwc-Jgk"
+    },
+    {
+      "store_id": 3858,
+      "store_name": "Save A Lot",
+      "source_city": "Gastonia",
+      "address": "1946 S Horner Blvd, Sanford, NC 27330",
+      "km_off": 184.1,
+      "reviews": 426,
+      "place_id": "ChIJ72m4WAinrIkRBzFTc9aWwpc"
+    },
+    {
+      "store_id": 3530,
+      "store_name": "Interfood 3 Hermanos",
+      "source_city": "Concord",
+      "address": "526 Village Ct, Garner, NC 27529",
+      "km_off": 184.0,
+      "reviews": 23,
+      "place_id": "ChIJayN9VQBhrIkRFuDw-FYr7J0"
+    },
+    {
+      "store_id": 3839,
+      "store_name": "Rush Street Food Market",
+      "source_city": "Wilmington",
+      "address": "201 Shelden Dr, Raleigh, NC 27610",
+      "km_off": 182.0,
+      "reviews": 62,
+      "place_id": "ChIJ7cuvsutfrIkRgZKpspenqK8"
+    },
+    {
+      "store_id": 3003,
+      "store_name": "Country Corner Grocery",
+      "source_city": "Pinnacle",
+      "address": "604 Jones Dairy Rd, Wake Forest, NC 27587",
+      "km_off": 179.7,
+      "reviews": 52,
+      "place_id": "ChIJFY0Rb_pRrIkRHDthQurhyjU"
+    },
+    {
+      "store_id": 3784,
+      "store_name": "Piggly Wiggly",
+      "source_city": "Hickory",
+      "address": "600 W Raleigh St #3732, Siler City, NC 27344",
+      "km_off": 175.1,
+      "reviews": 544,
+      "place_id": "ChIJ7xmb7_1LU4gR98rjHEItuLI"
+    },
+    {
+      "store_id": 2820,
+      "store_name": "Eldorado Outpost",
+      "source_city": "Ivanhoe",
+      "address": "4021 NC-109, Troy, NC 27371",
+      "km_off": 173.6,
+      "reviews": 1123,
+      "place_id": "ChIJg-rE3W-BVIgRzC-GCgpsvBU"
+    },
+    {
+      "store_id": 295,
+      "store_name": "Campus Mart",
+      "source_city": "Stanfield",
+      "address": "2604 Hillsborough St Ste 101, Raleigh, NC 27607",
+      "km_off": 168.9,
+      "reviews": 16,
+      "place_id": "ChIJzRCOdoX1rIkR67e_k-N86Wo"
+    },
+    {
+      "store_id": 3855,
+      "store_name": "Saunders Family Farms",
+      "source_city": "Rockingham",
+      "address": "4128 NC-127, Hickory, NC 28602",
+      "km_off": 163.2,
+      "reviews": 87,
+      "place_id": "ChIJjSEsjK0tUYgR5FzaxRbGSx0"
+    },
+    {
+      "store_id": 4197,
+      "store_name": "La Tapatia Supermarket",
+      "source_city": "Burgaw",
+      "address": "1700 St Albans Dr, Raleigh, NC 27609",
+      "km_off": 161.4,
+      "reviews": 495,
+      "place_id": "ChIJewXHPR5ZrIkRu5gDP1lGxAA"
+    },
+    {
+      "store_id": 900,
+      "store_name": "Han-Dee Hugo's",
+      "source_city": "Salisbury",
+      "address": "3029 Western Blvd, Raleigh, NC 27606",
+      "km_off": 160.0,
+      "reviews": 15,
+      "place_id": "ChIJa8rE95f1rIkRmcTWV74vT9c"
+    },
+    {
+      "store_id": 3551,
+      "store_name": "Just Save",
+      "source_city": "Lenoir",
+      "address": "429 W Meadowview Rd, Greensboro, NC 27406",
+      "km_off": 156.8,
+      "reviews": 136,
+      "place_id": "ChIJg5NZThYZU4gRhR8YyR93VEU"
+    },
+    {
+      "store_id": 3814,
+      "store_name": "Ramallah Food Mart and Cafe (Halal, Vegetarian, Vegan)",
+      "source_city": "Greensboro",
+      "address": "1547 E Market St, Smithfield, NC 27577",
+      "km_off": 150.5,
+      "reviews": 159,
+      "place_id": "ChIJA4l6ocJzrIkRTc-xDArak-c"
+    },
+    {
+      "store_id": 180,
+      "store_name": "AJ's Food Mart",
+      "source_city": "Mt Pleasant",
+      "address": "6204 Ten-Ten Rd, Apex, NC 27539",
+      "km_off": 150.0,
+      "reviews": 15,
+      "place_id": "ChIJVfRq04-LrIkRG0Yd717Qo4o"
+    },
+    {
+      "store_id": 177,
+      "store_name": "A-1 Food Mart",
+      "source_city": "Raeford",
+      "address": "3230 US-1, Franklinton, NC 27525",
+      "km_off": 142.0,
+      "reviews": 10,
+      "place_id": "ChIJ--Onwn2yrYkR5Pa-0x9KY6o"
+    },
+    {
+      "store_id": 4027,
+      "store_name": "Walmart Neighborhood Market",
+      "source_city": "Richfield",
+      "address": "973 N Harrison Ave, Cary, NC 27513",
+      "km_off": 140.3,
+      "reviews": 959,
+      "place_id": "ChIJnRCP4LfzrIkRmY6-6KTLiEc"
+    },
+    {
+      "store_id": 3774,
+      "store_name": "Peak Olive Oil Company",
+      "source_city": "Winston-Salem",
+      "address": "200 S Academy St #110, Cary, NC 27511",
+      "km_off": 140.1,
+      "reviews": 61,
+      "place_id": "ChIJy4VAIq_zrIkRIa-GSAnUNB4"
+    },
+    {
+      "store_id": 58,
+      "store_name": "6 Twelve Convenience Store",
+      "source_city": "Madison",
+      "address": "2109 Avent Ferry Rd Suite 120, Raleigh, NC 27606",
+      "km_off": 130.9,
+      "reviews": 27,
+      "place_id": "ChIJcT2Rlpn1rIkRD-FsLU0MGu4"
+    },
+    {
+      "store_id": 944,
+      "store_name": "Holt Oil Co Inc",
+      "source_city": "Hampstead",
+      "address": "1709 Clinton Rd, Fayetteville, NC 28312",
+      "km_off": 127.0,
+      "reviews": 1,
+      "place_id": "ChIJU4DWma4Sq4kRWD26fy6yln0"
+    },
+    {
+      "store_id": 1556,
+      "store_name": "Sheetz",
+      "source_city": "High Point",
+      "address": "600 Corporate Center Dr, Raleigh, NC 27607",
+      "km_off": 119.6,
+      "reviews": 790,
+      "place_id": "ChIJVYEr_3D0rIkR3qBG-1xVoYU"
+    },
+    {
+      "store_id": 1136,
+      "store_name": "Mack's Mart",
+      "source_city": "Greensboro",
+      "address": "7526 Knightdale Blvd # A, Knightdale, NC 27545",
+      "km_off": 112.1,
+      "reviews": 15,
+      "place_id": "ChIJ8a_7tVRbrIkR7t_mmcOvxL0"
+    },
+    {
+      "store_id": 1474,
+      "store_name": "Sam's Mini Mart",
+      "source_city": "Smithfield",
+      "address": "101 E Parker St, Graham, NC 27253",
+      "km_off": 111.8,
+      "reviews": 24,
+      "place_id": "ChIJz1CDjD4rU4gRVhGOaqF6rNc"
+    },
+    {
+      "store_id": 3710,
+      "store_name": "Mercado Plaza Latina",
+      "source_city": "Parkton",
+      "address": "1681 N Market Dr, Raleigh, NC 27609",
+      "km_off": 110.3,
+      "reviews": 58,
+      "place_id": "ChIJV369NwNZrIkRdx27b3tal1w"
+    },
+    {
+      "store_id": 791,
+      "store_name": "Family Market of Dunn",
+      "source_city": "Oxford",
+      "address": "610 E Broad St, Dunn, NC 28334",
+      "km_off": 105.0,
+      "reviews": 7,
+      "place_id": "ChIJu6naAfqBq4kRsAnDMnwDnsM"
+    },
+    {
+      "store_id": 629,
+      "store_name": "County Line Grocery & Grill",
+      "source_city": "Burlington",
+      "address": "2981 Pilot-Riley Rd, Zebulon, NC 27597",
+      "km_off": 104.0,
+      "reviews": 271,
+      "place_id": "ChIJ754n4xJJrIkR3QQICNII6T4"
+    },
+    {
+      "store_id": 4276,
+      "store_name": "ALDI",
+      "source_city": "Fayetteville",
+      "address": "6300 Creedmoor Rd, Raleigh, NC 27612",
+      "km_off": 92.2,
+      "reviews": 467,
+      "place_id": "ChIJETrdLH_3rIkRxzAUlj8W_Ks"
+    },
+    {
+      "store_id": 4193,
+      "store_name": "La Providencia",
+      "source_city": "Winston-Salem",
+      "address": "100 S Ross St, Robbins, NC 27325",
+      "km_off": 90.8,
+      "reviews": 31,
+      "place_id": "ChIJYb6WLManVIgRu8I0khoDiB8"
+    },
+    {
+      "store_id": 3430,
+      "store_name": "Guru Market",
+      "source_city": "Haw River",
+      "address": "635A Peters Creek Pkwy, Winston-Salem, NC 27103",
+      "km_off": 84.1,
+      "reviews": 10,
+      "place_id": "ChIJIQsNWACvU4gRAXInEF8UPsM"
+    },
+    {
+      "store_id": 1862,
+      "store_name": "Yogi mart",
+      "source_city": "Mooresville",
+      "address": "245 W 4th St, Winston-Salem, NC 27101",
+      "km_off": 83.7,
+      "reviews": 12,
+      "place_id": "ChIJDfFVY6mvU4gRRJ_juFwI2mg"
+    },
+    {
+      "store_id": 975,
+      "store_name": "J & J Mart & wireless",
+      "source_city": "Fayetteville",
+      "address": "2822 New Birch Dr #104, Raleigh, NC 27610",
+      "km_off": 83.0,
+      "reviews": 11,
+      "place_id": "ChIJFxDfP0ZerIkRDyBt0xY3ZUU"
+    },
+    {
+      "store_id": 1016,
+      "store_name": "Johnson Corner Grill",
+      "source_city": "Stedman",
+      "address": "9031 US-421, Currie, NC 28435",
+      "km_off": 80.7,
+      "reviews": 88,
+      "place_id": "ChIJnxsbZmQvqokRr7P8X9ll1eY"
+    },
+    {
+      "store_id": 4348,
+      "store_name": "Las Carolinas Supermarket",
+      "source_city": "Burlington",
+      "address": "505 Wake Chapel Rd, Fuquay-Varina, NC 27526",
+      "km_off": 80.1,
+      "reviews": 76,
+      "place_id": "ChIJ2aF13KOPrIkRh2fNDJmWyLQ"
+    },
+    {
+      "store_id": 1505,
+      "store_name": "Scotchman Store",
+      "source_city": "Rose Hill",
+      "address": "12320 NC-210, Benson, NC 27504",
+      "km_off": 76.4,
+      "reviews": 23,
+      "place_id": "ChIJn3pNUWF7rIkRyIkepouoP6I"
+    },
+    {
+      "store_id": 1405,
+      "store_name": "Rite Stop Market",
+      "source_city": "Sanford",
+      "address": "507 N Graham Hopedale Rd, Burlington, NC 27217",
+      "km_off": 75.7,
+      "reviews": 2,
+      "place_id": "ChIJs0Q01OYqU4gRch5tl6lkM98"
+    },
+    {
+      "store_id": 3946,
+      "store_name": "Tienda Los Arcos",
+      "source_city": "Harmony",
+      "address": "2504 W Sugar Creek Rd, Charlotte, NC 28262",
+      "km_off": 71.8,
+      "reviews": 12,
+      "place_id": "ChIJUVLE5q0fVIgRMaUvMlCSuRM"
+    },
+    {
+      "store_id": 2932,
+      "store_name": "Bo's Supermarket",
+      "source_city": "Southern Pines",
+      "address": "301 N Pine St, Lumberton, NC 28358",
+      "km_off": 70.3,
+      "reviews": 22,
+      "place_id": "ChIJNdJPH0znqokRLb1f3RmXCtE"
+    },
+    {
+      "store_id": 3004,
+      "store_name": "Country Market",
+      "source_city": "Fairview",
+      "address": "4635 Dysartsville Rd, Morganton, NC 28655",
+      "km_off": 70.1,
+      "reviews": 196,
+      "place_id": "ChIJlfN40_TKUIgRWo8mT1hY2YY"
+    },
+    {
+      "store_id": 4649,
+      "store_name": "In & Out Market Llc",
+      "source_city": "Sanford",
+      "address": "1830 New Bern Ave, Raleigh, NC 27610",
+      "km_off": 67.6,
+      "reviews": 1,
+      "place_id": "ChIJiVQhwh1frIkRgH7ABu_r0NI"
+    },
+    {
+      "store_id": 897,
+      "store_name": "Han-Dee Hugo's",
+      "source_city": "Fayetteville",
+      "address": "3945 Western Blvd, Raleigh, NC 27606",
+      "km_off": 64.3,
+      "reviews": 14,
+      "place_id": "ChIJAz2qMbD1rIkRQF6LxFaQtbs"
+    },
+    {
+      "store_id": 4437,
+      "store_name": "Walmart Grocery Pick Up and Delivery",
+      "source_city": "Hillsborough",
+      "address": "5141 NC 42, Garner, NC 27529",
+      "km_off": 62.4,
+      "reviews": 93,
+      "place_id": "ChIJre3pJhZlrIkRHBV9UPz852Q"
+    },
+    {
+      "store_id": 2891,
+      "store_name": "Andy Grocery & Services",
+      "source_city": "Richfield",
+      "address": "4369 US-158, Advance, NC 27006",
+      "km_off": 59.3,
+      "reviews": 58,
+      "place_id": "ChIJwdEuI0HHU4gR11369IhCY4g"
+    },
+    {
+      "store_id": 1344,
+      "store_name": "R-Mart",
+      "source_city": "Maple Hill",
+      "address": "3794 NC-111, Albertson, NC 28508",
+      "km_off": 57.7,
+      "reviews": 38,
+      "place_id": "ChIJDbcM6A1aqYkR55KKHN-_o00"
+    },
+    {
+      "store_id": 1921,
+      "store_name": "Walmart Supercenter",
+      "source_city": "Carthage",
+      "address": "2010 Kildaire Farm Rd, Cary, NC 27518",
+      "km_off": 55.9,
+      "reviews": 1500,
+      "place_id": "ChIJbxAorNKMrIkRJV1i9kkzfn4"
+    },
+    {
+      "store_id": 1504,
+      "store_name": "Scotchman Store",
+      "source_city": "Riegelwood",
+      "address": "7204 US-701 Hwy, Elizabethtown, NC 28337",
+      "km_off": 50.0,
+      "reviews": 33,
+      "place_id": "ChIJO18TCblSqokRta6Eu5OxM3Y"
+    },
+    {
+      "store_id": 1103,
+      "store_name": "Liberty Food Mart",
+      "source_city": "Thomasville",
+      "address": "3901 Alamance Church Rd, Liberty, NC 27298",
+      "km_off": 44.6,
+      "reviews": 13,
+      "place_id": "ChIJffMT_rs6U4gR1PqKIJ7BJRI"
+    },
+    {
+      "store_id": 763,
+      "store_name": "Fairview Grocery",
+      "source_city": "Marion",
+      "address": "1612 Charlotte Hwy, Fairview, NC 28730",
+      "km_off": 43.6,
+      "reviews": 6,
+      "place_id": "ChIJZz4LBA_wWYgRDtJzVKcDKdU"
+    },
+    {
+      "store_id": 1437,
+      "store_name": "Rushco Food Stores",
+      "source_city": "Salisbury",
+      "address": "644 Davidson Gateway Dr, Davidson, NC 28036",
+      "km_off": 43.5,
+      "reviews": 22,
+      "place_id": "ChIJaZOTO8irVogRtQlAQcZCEqQ"
+    },
+    {
+      "store_id": 3465,
+      "store_name": "Harris Teeter",
+      "source_city": "Jacksonville",
+      "address": "203 Alston Blvd Ext, Hampstead, NC 28443",
+      "km_off": 41.4,
+      "reviews": 959,
+      "place_id": "ChIJVVVVVRWaqYkR0MgGkcT0ipc"
+    },
+    {
+      "store_id": 3459,
+      "store_name": "Harris Teeter",
+      "source_city": "Hickory",
+      "address": "118 Argus Ln, Mooresville, NC 28117",
+      "km_off": 40.9,
+      "reviews": 643,
+      "place_id": "ChIJpX6vlpxUUYgR8c_LWgMKtyg"
+    },
+    {
+      "store_id": 3469,
+      "store_name": "Harris Teeter",
+      "source_city": "Roxboro",
+      "address": "5116 N Roxboro St, Durham, NC 27704",
+      "km_off": 39.9,
+      "reviews": 949,
+      "place_id": "ChIJZcq_vJPjrIkR3SFd0eXHePs"
+    },
+    {
+      "store_id": 4161,
+      "store_name": "ANA'S GROCERY",
+      "source_city": "Mooresville",
+      "address": "959 Salisbury Rd, Mocksville, NC 27028",
+      "km_off": 38.9,
+      "reviews": 16,
+      "place_id": "ChIJ9eWhj9HpU4gRrOMX6tKfz1Y"
+    },
+    {
+      "store_id": 1089,
+      "store_name": "La Romero",
+      "source_city": "Monroe",
+      "address": "6301 South Blvd, Charlotte, NC 28217",
+      "km_off": 38.7,
+      "reviews": 259,
+      "place_id": "ChIJT8iKF5aeVogRYR7NMbm9mWk"
+    },
+    {
+      "store_id": 1284,
+      "store_name": "Parker Mart",
+      "source_city": "Winston-Salem",
+      "address": "Patterson St, Lexington, NC 27292",
+      "km_off": 38.3,
+      "reviews": 3,
+      "place_id": "ChIJL4_5JeiZU4gRYQXz4usWVxA"
+    },
+    {
+      "store_id": 303,
+      "store_name": "Carolina Open Air Market",
+      "source_city": "Durham",
+      "address": "6422-6468 Poole Rd, Raleigh, NC 27610",
+      "km_off": 35.8,
+      "reviews": 100,
+      "place_id": "ChIJ4ccUoLNdrIkRykbHwjzJ4vY"
+    },
+    {
+      "store_id": 3238,
+      "store_name": "Food Lion",
+      "source_city": "Mars Hill",
+      "address": "35 Westridge Market Pl, Candler, NC 28715",
+      "km_off": 35.0,
+      "reviews": 768,
+      "place_id": "ChIJV4S14HCOWYgRLvz0VnZFIJ0"
+    },
+    {
+      "store_id": 4105,
+      "store_name": "Maria's Health Shoppe",
+      "source_city": "Wilmington",
+      "address": "14540 US-17 Suite 12, Hampstead, NC 28443",
+      "km_off": 35.0,
+      "reviews": 167,
+      "place_id": "ChIJ9cGutrGRqYkRmRfjJcQls_U"
+    },
+    {
+      "store_id": 4054,
+      "store_name": "Whole Foods Market",
+      "source_city": "Southport",
+      "address": "3804 Oleander Dr, Wilmington, NC 28403",
+      "km_off": 34.5,
+      "reviews": 1245,
+      "place_id": "ChIJyUckFKH1qYkRlRrUK6QYEzA"
+    },
+    {
+      "store_id": 3387,
+      "store_name": "Food Matters Market And Cafe",
+      "source_city": "Hickory",
+      "address": "210 Avery Ave, Morganton, NC 28655",
+      "km_off": 33.9,
+      "reviews": 546,
+      "place_id": "ChIJMU_wGNfRUIgRXeXhrIAKKUE"
+    },
+    {
+      "store_id": 3860,
+      "store_name": "Save A Lot",
+      "source_city": "Winston Salem",
+      "address": "429 W Meadowview Rd, Greensboro, NC 27407",
+      "km_off": 33.1,
+      "reviews": 402,
+      "place_id": "ChIJcw7UqKYZU4gRwWYeXgrC2_M"
+    },
+    {
+      "store_id": 3950,
+      "store_name": "Tienda Marisol 2",
+      "source_city": "Pink Hill",
+      "address": "605 N Breazeale Ave, Mt Olive, NC 28365",
+      "km_off": 33.1,
+      "reviews": 41,
+      "place_id": "ChIJdTaGyVL6q4kRg7o0iqeOiHg"
+    },
+    {
+      "store_id": 4053,
+      "store_name": "Whole Foods Market",
+      "source_city": "Prospect Hill",
+      "address": "621 Broad St, Durham, NC 27705",
+      "km_off": 33.0,
+      "reviews": 1236,
+      "place_id": "ChIJ38z-rAfkrIkRAZb_Svai0pM"
+    },
+    {
+      "store_id": 3653,
+      "store_name": "Lowes Foods of Huntersville",
+      "source_city": "Gastonia",
+      "address": "14021 Boren St, Huntersville, NC 28078",
+      "km_off": 32.7,
+      "reviews": 401,
+      "place_id": "ChIJNRN2Ec2pVogRXY5wF1zNbFQ"
+    },
+    {
+      "store_id": 2864,
+      "store_name": "Washburn's General Store",
+      "source_city": "Morganton",
+      "address": "2426 Bostic Sunshine Hwy, Bostic, NC 28018",
+      "km_off": 32.1,
+      "reviews": 309,
+      "place_id": "ChIJS8IV-iM5V4gRqxYqWDrCH1A"
+    },
+    {
+      "store_id": 4297,
+      "store_name": "ALDI",
+      "source_city": "Laurinburg",
+      "address": "723 US Hwy 74E, Rockingham, NC 28379",
+      "km_off": 31.0,
+      "reviews": 613,
+      "place_id": "ChIJpccFJfjmVIgRh3oVBcDTFJE"
+    },
+    {
+      "store_id": 33,
+      "store_name": "Oriental Store Of Raleigh",
+      "source_city": "Durham",
+      "address": "3601 Capital Blvd STE 101, Raleigh, NC 27604",
+      "km_off": 28.9,
+      "reviews": 334,
+      "place_id": "ChIJ1V8MqmtZrIkRfwu0jyNxl7M"
+    },
+    {
+      "store_id": 3385,
+      "store_name": "Food Mart",
+      "source_city": "Red Springs",
+      "address": "122 S Reilly Rd, Fayetteville, NC 28314",
+      "km_off": 27.9,
+      "reviews": 34,
+      "place_id": "ChIJP7F7kuRrq4kRjcST7UHBFyM"
+    },
+    {
+      "store_id": 3439,
+      "store_name": "Harmony IGA",
+      "source_city": "Cleveland",
+      "address": "3235 Harmony Hwy, Harmony, NC 28634",
+      "km_off": 27.6,
+      "reviews": 47,
+      "place_id": "ChIJwVvVrnHfU4gRo80S-mvB-s0"
+    },
+    {
+      "store_id": 1274,
+      "store_name": "Oxford Express Mart",
+      "source_city": "Franklinton",
+      "address": "4111 US-158, Oxford, NC 27565",
+      "km_off": 27.2,
+      "reviews": 0,
+      "place_id": "ChIJPeAgcAClrYkRWbcQuQ1W8x0"
+    },
+    {
+      "store_id": 1876,
+      "store_name": "Kohl's",
+      "source_city": "Lexington",
+      "address": "1395 Klumac Rd, Salisbury, NC 28147",
+      "km_off": 26.9,
+      "reviews": 1081,
+      "place_id": "ChIJjeFUR3DzU4gRXH-bhlWDnsY"
+    },
+    {
+      "store_id": 4237,
+      "store_name": "Tienda el primo",
+      "source_city": "Durham",
+      "address": "105 Nottingham Dr, Cary, NC 27511",
+      "km_off": 25.1,
+      "reviews": 50,
+      "place_id": "ChIJh_Aqn4T0rIkRUrDeA6VCcug"
+    }
+  ],
+  "worst": "BLOCKER"
+}

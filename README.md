@@ -1,153 +1,153 @@
 # NC Grocery Store Reviews — Data Pipeline & Scraper
 
-Data infrastructure for research on **aspatial food access**: measuring food deserts through the
-lived *experience* of grocery shopping rather than distance-to-store alone.
+Data infrastructure for research on **aspatial food access**: measuring food deserts through
+the lived *experience* of grocery shopping — what people write in Google Maps reviews —
+rather than distance-to-store alone. Built for Teresa Groton's MS thesis research (NC State ISE,
+Prof. Benjamin Rachunok's group); the method was demonstrated for Raleigh, and this repo
+scales the data collection to all of North Carolina.
 
-Most food desert measures are geographic — how far you live from a supermarket. The research this
-repo supports (NC State ISE, Prof. Benjamin Rachunok's group) instead operationalizes the
-**Penchansky & Thomas five dimensions of access** — availability, accessibility, accommodation,
-affordability, acceptability — by mining what people actually write in Google Maps reviews of
-grocery stores. That approach was demonstrated for Raleigh. **This repo is the pipeline that scales
-it to all of North Carolina.**
+**→ Read [`PHASE1_REPORT.md`](PHASE1_REPORT.md) first.** It is the Phase 1 project report: goal, method, final numbers,
+known limits and where everything is. [`STATUS.md`](STATUS.md) is the full decision log behind it.
+The scoring pipeline (Phase 2) lives in its own repo, `suyashh77/nc-aspatial-food-access`.
 
-**Result: 4,889 stores · 1,201,237 reviews · 578 NC cities · 13 grocery categories.**
+**Final, 2026-10-24 (freeze v2, scraping closed):** 4,442 stores · **1,941,538 reviews** · 99.6 % filled against
+targets capped at 1,500 (about 88 % of Google's true counts). The frozen file is `Data/Step_5_master_reviews_FROZEN_2026-10-24.db`
+(SHA-256 in `Remediation/master_freeze_manifest_v2.json`) and the store table is `NC_Grocery_POIs_v2` (rebuilt from freeze v2; in the Phase 1 deliverable).
+Completion rule: target capped at 1,500, up to 10/20/50/100 missing for targets ≤100/>100/>500/>1,500.
+4,400 stores complete, 42 short. Stores past 1,500 hold only their newest reviews. See `STATUS.md` §4.1 before any per-store analysis.
 
 ---
 
-## What's in here
+## Layout
 
-| Path | What it is |
+| path | what |
 |---|---|
-| [`Data/`](Data/) | Pipeline documentation, data dictionary, and quality/limitations reports (data files themselves are not in git — see below) |
-| [`Step_1.4_EnrichOverture__Program/`](Step_1.4_EnrichOverture__Program/) | Stage 1: resolves raw Overture Maps POIs to Google Maps `place_id`s |
-| [`Scraper_v2/`](Scraper_v2/) | **Current** review scraper — headless Playwright, Linux/VM, continuous orchestration |
-| [`Scraper_v1/`](Scraper_v1/) | Previous VM scraper generation, kept for provenance |
-| [`Gmaps_Scraper_MacWindows/`](Gmaps_Scraper_MacWindows/) | Tkinter GUI build — one-double-click distribution so non-technical classmates could run batches on their own laptops |
-| [`Archive/`](Archive/) | Earlier architectures that didn't survive contact with production. Kept deliberately — see [What failed](#what-failed-and-why) |
+| [`PHASE1_REPORT.md`](PHASE1_REPORT.md) | Phase 1 project report (start here) |
+| [`STATUS.md`](STATUS.md) | full decision log, numbers and history |
+| [`Frame/`](Frame/README.md) | **Step 1** — the store universe: four-source frame (SNAP · Overture · OSM · project assets), Google probe (`probe.py`), probe result merge |
+| [`Scraper_v2/`](Scraper_v2/) | **Step 2** — the review scraper: `linux_scraper/` package (headless Playwright), `run_continuous.py` orchestrator, `linux_scraper.merge_results` |
+| [`Remediation/`](Remediation/README.md) | audit + repair scripts for the master DB; `r00_validate.py` is the definition of "authoritative" |
+| [`Deploy/`](Deploy/README.md) | `build_kit.py` assembles the volunteer kits (review kit for Linux boxes, probe kit for a Windows box) from canonical code |
+| [`Data/`](Data/README.md) | data lineage, schema and quality history; the data files themselves are gitignored |
+| `Auth/` | live Google session cookies (gitignored — never commit, never share) |
+| [`Archive/`](Archive/README.md) | superseded scrapers and the old enrichment stage, kept for provenance |
 
-Start with [`Data/PROJECT_OVERVIEW.md`](Data/PROJECT_OVERVIEW.md), then
-[`Data/Data Collection Process.md`](Data/Data%20Collection%20Process.md).
+## Run
 
----
+```bash
+pip install -r requirements.txt            # plus: pip install -e <path to geomatch> for Frame/s09,s10,s13
+python -m pytest -q                        # 329 tests
+
+python Frame/probe.py --stats              # probe queue state
+python Remediation/r00_validate.py --fail-on HIGH   # master DB health, read-only; exit 0 = authoritative
+
+# volunteer kits
+python Deploy/build_kit.py review --batches Data/batches/run1.db Data/batches/run2.db --with-auth
+python Deploy/build_kit.py probe --with-auth
+
+# rulings and manual checks (each dry-runs unless given --apply)
+python Remediation/r15_tolerance.py                      # completion rule: reopens short stores; target > 1,000 missing < 10 is complete
+python Remediation/r16_round4_answers.py <done.xlsx>     # apply a completed manual-check workbook
+python Remediation/r17_restore_confirmed.py              # restore reviews a scrape of the store's own page confirms
+python Remediation/r18_compare_rescrape.py               # compare over-target stores with a full rescrape; writes the manual workbook
+
+# merge what volunteers send back (dry-run first)
+cd Scraper_v2 && python -m linux_scraper.merge_results ../Data/returns/<dir>/*.db --master ../Data/Step_5_master_reviews.db --dry-run
+python Frame/probe_merge.py Data/returns/<dir>/probe_<machine>_<stamp>.db
+```
 
 ## The pipeline
 
 ```
-Overture Maps US POIs                     451,296
-  └─ NC filter                             16,680
-     └─ GMaps enrichment (Step 1.4)         7,858 matched + 6,607 unmatched
-        └─ Outscraper second pass          21,840 results
-           └─ Fuzzy match + manual review   4,905 matched / 1,605 rejected
-              └─ Category filter            424 GMaps categories → 13 in, 411 out
-                 └─ Closed-store + place_id dedup
-                    └─ Review scraping      1,201,237 reviews
-                       └─ Step_5_master_reviews.db
+USDA SNAP · Overture 2026-08 · OpenStreetMap · project assets      91,461 records
+  └─ Frame/s05 conflation → s06 rulings → s07 gates                36,820 stores
+     └─ Frame/s10 scope cut (established bricks-and-mortar only)   16,751 candidates
+        └─ Frame/probe.py on Google Maps (category, place_id,       16,751 probed
+           live review count, open/closed)                          → rulings (next)
+           └─ Remediation/r09 scrape queue → Deploy/build_kit.py review → volunteers
+              └─ Scraper_v2 (place_id-verified, resumable, deduped on review_id)
+                 └─ linux_scraper.merge_results → Data/Step_5_master_reviews.db
 ```
 
-Every dropped store is retained with a reason (`CATEGORY_NON_GROCERY`, `MANUAL_REVIEW_UNMATCHED`,
-`CLOSED_STORE`) in a 7,497-row exclusion audit — a filtered-out store is a research finding, not
-a deleted row. Every review carries a `source_db` provenance tag.
+Every dropped store keeps a row and a reason; every review carries `source_db`,
+`machine_id` and Google's `review_id`.
 
----
+## Engineering notes — what turned out to be the real problems
 
-## Running the scraper
+**The frame decides everything downstream.** A store that never enters the candidate list
+is invisible to every later measurement. The first frame retained 14–38 % of candidates
+depending on ZIP prefix, worst in rural eastern NC — it would have reported food deserts
+that were pipeline artifacts. Hence the four-source rebuild and the five validation gates.
 
-```bash
-# One-time setup on a Linux VM
-bash Scraper_v2/linux_scraper/setup.sh
+**Verify by identity, not by name.** The original enrichment computed a name similarity,
+logged it, and accepted on both branches. Sam's Club "Hendersonville" resolved to Raleigh
+with 1,062 reviews. The scraper now navigates by `place_id` and rejects a page whose id
+differs; the distance check reads the business pin, because after navigating to
+`/@lat,lon` the map camera *is* the coordinate you asked for and the old check measured
+nothing.
 
-# Continuous run: scrape → restart on crash → drain the batch
-python Scraper_v2/run_continuous.py --batch batch1.db
+**A scroll that silently does nothing looks exactly like the end of the list.** The review
+panel was chosen by first selector match; when that was not the panel, 60 empty cycles
+later the store was "complete" at whatever the first screen held. The container is now
+found by walking up from a real review node, and every scroll verifies `scrollTop` moved.
 
-# Monitor
-python -m linux_scraper stats batch1.db --monitor
-```
+**Resumability is the whole game.** State lives in SQLite: stores flow
+`pending → in_progress → completed`, interrupted stores reset on restart, reviews flush in
+batches, and `reviews_scraped` is re-read from disk after every flush (an in-memory
+counter once produced 2,263 phantom reviews).
 
-Full VM deployment guide: [`Scraper_v2/linux_scraper/VM_INSTRUCTIONS.md`](Scraper_v2/linux_scraper/VM_INSTRUCTIONS.md).
+**Two kinds of block, two responses.** A sign-in wall burns the *account* → rotate to the
+next session. A CAPTCHA burns the *IP* → write `pause.flag`, sleep 30–60 min. One machine
+per IP; two scrapers behind one address reach the threshold twice as fast for the same
+throughput.
 
-You supply your own Google auth sessions as Playwright `storage_state` JSON. **They are
-gitignored and must never be committed** — they are live session cookies.
+**Hand-copied kits drift.** Within four days the volunteers' copy had diverged from the
+repo and a fix on one side never reached the other. Kits are now built by
+`Deploy/build_kit.py` with a hashed manifest; the repo is the only source.
 
----
+**A uniformly populated field is as suspect as a uniformly empty one.** `helpful_count`,
+`photo_count`, `service_type` were "fixed" once by selectors that matched page furniture.
+Counting what each selector matched on live pages (`Remediation/probe_review_dom.py`)
+showed Google renders no such elements; the fields are unavailable, not zero.
 
-## Engineering notes
+**A quarantine that the merge honours can eat good data.** The wrong-page cleanup set aside
+whole batches whose reviews outnumbered a store's live count, and the merge treats quarantined
+rows as already known. A fresh scrape of the store's own page then came back as "duplicates" and
+was dropped. 4,529 reviews across 25 stores were recovered by restoring only the rows that a
+scrape of the store's own page returned again and no other store held (`Remediation/r17`).
 
-Things that turned out to be the actual problem, not the ones I expected:
+**"Google ceiling" is a symptom, not a limit.** 190 stores stopped short after four sort orders
+and were about to be labelled capped; one more pass on a fresh session returned 24,481 more
+reviews. Retry before you label. What is left after repeated full passes that return nothing
+new is the genuinely Google-limited set, ruled complete with the evidence in `status_reason`.
 
-**Resumability is the whole game.** An 8-hour run that loses everything to a Wi-Fi blip is worth
-zero. State lives in SQLite, not memory: stores flow `pending → in_progress → completed/failed`,
-interrupted stores auto-reset on restart, reviews flush to disk in batches, and each store persists
-a resume marker *including which sort order it was mid-way through* so a restart re-enters the same
-review ordering instead of starting over.
-
-**`reviews_scraped` must be read back from disk.** Incrementing an in-memory counter and trusting
-it produced 2,263 phantom reviews in batch1. The count is now re-read from the `reviews` table
-after every flush, so the store's progress can never drift from what was actually persisted.
-
-**Scroll stalls aren't the end of the list.** Google Maps stops yielding new reviews long before
-you've seen them all. When a scroll stalls, the scraper re-sorts (`newest → oldest → relevant`) —
-different sort orders surface different subsets of the same review set — and keeps collecting.
-
-**Deduping needs two layers.** Within a run, Google's `data-review-id`. Across the ~49 batch DBs
-that merged into master, `(store_id, reviewer_name, rating, review_text[:50])` — because review IDs
-aren't stable across sessions. A master skip-list also lets a resumed store early-exit after 60
-consecutive already-known reviews instead of scrolling a whole page of duplicates.
-
-**Chain stores silently poison your data.** "Dollar General" matches at the wrong location and
-scrapes 1,051 reviews for a store whose target was 77. `verify_store()` now cross-checks the page
-name against a haversine distance from the expected coordinates, rejecting a name-match that's
->10 km off. Not a hard distance reject, though — Overture coordinates are routinely 1–2 km off
-Google's even for the *correct* store, and a strict threshold wrongly rejected ~25 valid stores.
-
-**Blocks have two different shapes, needing two different responses.** A sign-in wall means *this
-account* is burned → ban it, rotate to the next in the pool. A CAPTCHA means *this IP* is burned →
-write a global `pause.flag` and sleep 30–60 min. Treating both the same wastes accounts.
-
-**Detection checks must be cheap.** CAPTCHA detection reads `page.url` + `page.title()`, never
-`page.content()` — a full DOM fetch on every scroll cycle caused memory pressure that degraded
-long runs.
-
----
+**WAL sidecars.** Copying a `.db` while committed pages sit in its `-wal` produces a copy
+that is quietly missing the latest reviews. Every copy path checkpoints first or uses
+`VACUUM INTO`.
 
 ## What failed, and why
 
-`Archive/` holds four earlier architectures. They're in the repo on purpose:
+`Archive/` holds the earlier architectures on purpose:
 
-| Attempt | Why it died |
+| attempt | why it died |
 |---|---|
-| Config-driven package (`gmaps_reviews_scraper/`) | Clean abstractions, wrong ones. Selector changes on Google's side required edits across `selectors.py`, `models.py`, and `scraper.py`. |
-| Multiprocessing worker pool | SQLite contention. Fixed with WAL + `BEGIN IMMEDIATE` store claiming, but process-level parallelism was never the bottleneck — Google's rate limits were. |
-| Tkinter GUI distributed to classmates | Worked, and shipped 25 student batch DBs (+19,992 reviews). But it leaked browser tabs across 8-hour runs, halted the whole batch on one bad store, and had no checkpointing. Every one of those complaints became a design requirement for v1/v2. See [`Archive/Step2_Review_Scraper_Program/Fixes.txt`](Archive/Step2_Review_Scraper_Program/Fixes.txt) — the actual user feedback. |
-| Proxy rotation | Removed in v2. Added latency and launch hangs without meaningfully reducing blocks; account rotation did the job. |
-
----
-
-## Known limitations
-
-Documented honestly in [`Data/Data Quality Report.md`](Data/Data%20Quality%20Report.md) rather than
-buried. The headline ones:
-
-- **The text corpus is ~608K reviews, not 1.20M** — 49.4% of Google Maps reviews are rating-only.
-- **157 over-scraped stores** from the wrong-location bug predate the geo guardrail and still need reconciliation.
-- **Costco is missing entirely** (NC has 9); Harris Teeter and Ingles are undercounted — likely dropped at the category filter.
-- **`helpful_count`, `photo_count`, `service_type` are unusable** (100% zero/NULL — never extracted).
-- **`date_relative` is Google's natural-language string** ("2 years ago"); no absolute dates parsed yet.
-- **`reviewer_name` is not a key** — "Chris" reviews 240 distinct stores.
-
-The path from "usable" to "authoritative" is itemized and effort-estimated in
-[`Data/Future_Work.md`](Data/Future_Work.md).
-
----
+| Config-driven package (`gmaps_reviews_scraper/`) | Clean abstractions, wrong ones: a Google selector change touched three files. |
+| Multiprocessing worker pool | SQLite contention, and process parallelism was never the bottleneck — Google's per-IP limit was. |
+| Tkinter GUI for classmates | Shipped 25 student batches (+19,992 reviews) but leaked tabs, halted on one bad store, no checkpointing. Every complaint became a requirement. |
+| Proxy rotation | Latency and launch hangs without fewer blocks; account rotation did the job. |
+| Step 1.4 enrichment | Verifier inert — took Google's first result for every query. Replaced by `Frame/probe.py`. |
+| Scraper v1 (name-search navigation) | No `place_id` navigation or verification; wrong-location scrapes. Replaced by v2. |
+| Hand-copied deployment folders | Drifted from the repo in days. Replaced by `Deploy/build_kit.py`. |
 
 ## Data availability
 
-The dataset (`Step_5_master_reviews.db`, ~214 MB, plus intermediate Excel/CSV artifacts) is not in
-this repository — too large for git, and it's research data belonging to the project. The repo
-contains the code and the full documentation needed to reproduce it. For data access, contact the
-research group.
+`Data/Step_5_master_reviews_FROZEN_2026-10-24.db` (~640 MB, freeze v2) and the intermediate artifacts are research data
+belonging to the project and are not in this repository. The repo contains the code and
+the documentation needed to reproduce them; for data access, contact the research group.
 
 ## Acknowledgements
 
-Built for **Teresa Gorton**'s dissertation research on aspatial food access, advised by
+Built for **Teresa Groton**'s dissertation research on aspatial food access, advised by
 **Prof. Benjamin Rachunok**, NC State ISE. Thanks to the ISE 408 students whose batch runs
-contributed 19,992 reviews and whose bug reports made the scraper survivable.
+contributed 19,992 reviews, and to the volunteers running the Forrester, Manabe and Holling
+machines.

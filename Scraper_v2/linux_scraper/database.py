@@ -12,6 +12,7 @@ Key features:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sqlite3
@@ -23,6 +24,9 @@ from typing import Any, Iterable, Sequence
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+logger = logging.getLogger("database")
+
 
 def _row_factory(cursor: sqlite3.Cursor, row: tuple) -> dict:
     """Row factory that returns dict-like rows (similar to psycopg2 RealDictCursor)."""
@@ -126,6 +130,8 @@ class DatabaseManager:
                 input_lat         REAL,
                 input_lon         REAL,
                 google_place_id   TEXT UNIQUE,
+                google_feature_id TEXT,
+                master_store_id   INTEGER,
                 gmaps_name        TEXT,
                 gmaps_address     TEXT,
                 gmaps_phone       TEXT,
@@ -152,7 +158,8 @@ class DatabaseManager:
             )
         """)
         # Migrate existing batch DBs that pre-date the resume columns
-        for col, decl in (("last_sort_order", "TEXT"), ("last_review_id", "TEXT")):
+        for col, decl in (("last_sort_order", "TEXT"), ("last_review_id", "TEXT"),
+                          ("google_feature_id", "TEXT"), ("master_store_id", "INTEGER")):
             try:
                 cur.execute(f"ALTER TABLE stores ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
@@ -444,9 +451,20 @@ class DatabaseManager:
         SQLite equivalent of PostgreSQL's SELECT FOR UPDATE SKIP LOCKED.
         Uses retry with backoff on SQLITE_BUSY.
 
-        Priority: biggest gap first — stores needing the most reviews go first.
+        Priority: never-scraped stores first, then the biggest gap. A batch whose
+        metadata says claim_order=need (r09 --order need) drops the first rule and
+        goes strictly biggest gap first.
         """
         now = datetime.now().isoformat()
+        try:
+            claim_order = self.get_metadata("claim_order")
+        except sqlite3.OperationalError:          # an older batch with no metadata table
+            claim_order = None
+        fresh_first = ("" if claim_order in ("need", "pct") else
+                       "CASE WHEN COALESCE(master_reviews, 0) = 0 THEN 0 ELSE 1 END,")
+        # claim_order=pct (r09 --order pct): the store furthest short of its OWN target first
+        share_missing = ("(target_reviews - COALESCE(master_reviews, 0)) * 1.0 / MAX(target_reviews, 1) DESC,"
+                         if claim_order == "pct" else "")
         for attempt in range(5):
             try:
                 cur = self.conn.cursor()
@@ -454,8 +472,8 @@ class DatabaseManager:
                 cur.execute("""
                     SELECT store_id FROM stores
                     WHERE status = 'pending' AND attempts < ?
-                    ORDER BY
-                        (target_reviews - master_reviews) DESC,
+                    ORDER BY """ + fresh_first + share_missing + """
+                        (target_reviews - COALESCE(master_reviews, 0)) DESC,
                         store_id
                     LIMIT 1
                 """, (max_retries,))
@@ -501,6 +519,25 @@ class DatabaseManager:
                 worker_id=NULL, error_message=NULL, updated_at=?
             WHERE store_id=?
         """, (reviews_scraped, datetime.now().isoformat(), store_id))
+        self.conn.commit()
+
+    def mark_store_progress(self, store_id: int, reviews_scraped: int,
+                            note: str = "") -> None:
+        """Requeue a store that advanced but is not finished.
+
+        Distinct from mark_store_failed on purpose. A large listing yields only a
+        bounded slice of its reviews per visit, so needing another pass is the
+        normal case for a big store, not an error. Attempts is decremented so the
+        retry budget is spent only on stores that are genuinely stuck, while the
+        column still records that a visit happened.
+        """
+        cur = self.conn.cursor()
+        cur.execute("""
+            UPDATE stores
+            SET status='pending', reviews_scraped=?, worker_id=NULL,
+                error_message=?, attempts=MAX(attempts-1, 0), updated_at=?
+            WHERE store_id=?
+        """, (reviews_scraped, str(note)[:500], datetime.now().isoformat(), store_id))
         self.conn.commit()
 
     def mark_store_failed(self, store_id: int, error_message: str) -> None:
@@ -559,6 +596,30 @@ class DatabaseManager:
             "UPDATE stores SET reviews_scraped=?, updated_at=? WHERE store_id=?",
             (count, datetime.now().isoformat(), store_id),
         )
+        self.conn.commit()
+
+    def update_store_identity(self, store_id: int, place_id: str | None,
+                              feature_id: str | None) -> None:
+        """Record the Google ids the scraper actually landed on.
+
+        Only empty columns are filled: a store queued by feature id gains its
+        ChIJ place_id here, which the merge then backfills into master. A
+        place_id already held by another row in this batch is left alone rather
+        than raising, because identity is settled at merge time, not here.
+        """
+        cur = self.conn.cursor()
+        if feature_id:
+            cur.execute("UPDATE stores SET google_feature_id=? WHERE store_id=? "
+                        "AND (google_feature_id IS NULL OR google_feature_id='')",
+                        (feature_id, store_id))
+        if place_id:
+            try:
+                cur.execute("UPDATE stores SET google_place_id=? WHERE store_id=? "
+                            "AND (google_place_id IS NULL OR google_place_id='')",
+                            (place_id, store_id))
+            except sqlite3.IntegrityError:
+                logger.warning(f"place_id {place_id} already belongs to another store "
+                               f"in this batch; not written to store {store_id}")
         self.conn.commit()
 
     def update_store_live_review_count(self, store_id: int, live_count: int) -> None:

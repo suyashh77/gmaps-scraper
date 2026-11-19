@@ -1,0 +1,20 @@
+# secrets: live Google session cookies, never commit or share
+auth/
+google_auth*.json
+*.json.banned
+
+# runtime
+.venv/
+__pycache__/
+*.py[cod]
+logs/
+results/
+machine_id.txt
+pause.flag
+*.log
+debug_*.png
+
+# batch data
+*.db-wal
+*.db-shm
+*_backup_*.db

@@ -1,0 +1,172 @@
+{
+  "kit": "review_kit",
+  "built_at": "2026-09-25T22:15:41+00:00",
+  "git_commit": "ebf8d07",
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "3d7a3749c488e7ea776e53f9f2cb909af4014ef4479220c343c36b6c818d029b",
+      "bytes": 246
+    },
+    {
+      "path": "_run.sh",
+      "sha256": "c55f31a54b3f412c1ea89c360546bcff0c5f6fd80d80e9c88dba1305a79d2288",
+      "bytes": 3096
+    },
+    {
+      "path": "auth/google_auth_1.json",
+      "sha256": "6ed82cdbd33e05e8eadd15d13d8d5a4a9cdae9c36f0ae771f8f47c35fff1d44e",
+      "bytes": 13043
+    },
+    {
+      "path": "auth/google_auth_2.json",
+      "sha256": "0e19cb8c3a6ebb07bddae4707b452c93301fae184e261d2ba1a1915307b6020b",
+      "bytes": 7221
+    },
+    {
+      "path": "auth/google_auth_3.json",
+      "sha256": "51a197c1f3bf86feae14321ae215dca030773af4b0a93911276b84877c613690",
+      "bytes": 5328
+    },
+    {
+      "path": "batches/dewey1.db",
+      "sha256": "d48163fc2cdf4df8ed45fefda938510f68f35099dd4a6c7ae5648ea164f018cd",
+      "bytes": 28581888
+    },
+    {
+      "path": "batches/dewey2.db",
+      "sha256": "73408492ead850766ff3f19a91c231e7119072f6a47e504e72d0824c69be4ed6",
+      "bytes": 28971008
+    },
+    {
+      "path": "collect.bat",
+      "sha256": "28af3d34f0b738350c84ae7062efc04dcd60244a2e2ad51fddd412aee47d88d8",
+      "bytes": 95
+    },
+    {
+      "path": "collect.py",
+      "sha256": "ce811651b7552af7c42ad4d9b686958ad04b1bc48094dbdb0c63171bd05bf44a",
+      "bytes": 2249
+    },
+    {
+      "path": "collect_results.sh",
+      "sha256": "fad9363f446a96291e363ade4cd01a0e1b24a304cbf4db7aea1b897fbf92c940",
+      "bytes": 199
+    },
+    {
+      "path": "linux_scraper/__init__.py",
+      "sha256": "1bdd12a0438dd2575c7e4dca754334dc8b66c0be7451052a3e81c17f088f1da2",
+      "bytes": 1197
+    },
+    {
+      "path": "linux_scraper/__main__.py",
+      "sha256": "473f481d6fd28988c890cce1632ed6284bfa24fbbd1bb4e26ce44e95ad9c2bea",
+      "bytes": 7859
+    },
+    {
+      "path": "linux_scraper/auth_manager.py",
+      "sha256": "e09f8a20e2627a6f2695290b91d0494208467dd98e73c63067c2f619f97a6ef5",
+      "bytes": 5796
+    },
+    {
+      "path": "linux_scraper/cli.py",
+      "sha256": "41087672b329bf1862e20f97ac6fd60db55576daf1072118ead1777f8d7cfa22",
+      "bytes": 13362
+    },
+    {
+      "path": "linux_scraper/config.py",
+      "sha256": "cb5f1e8a58b5986cc270da64a107a80affaa3044477d7be3652d4ba8edbef9c5",
+      "bytes": 1340
+    },
+    {
+      "path": "linux_scraper/database.py",
+      "sha256": "b241e771da86b49855a7dfc6f9ef22f00f75528482f050cdfd7d3e7b2c30818c",
+      "bytes": 37079
+    },
+    {
+      "path": "linux_scraper/export_for_scraping.py",
+      "sha256": "7b6f8592ab3ddad37e48cff1d881509bc2f0f357db2f9fd3cb27fe4c71ed5a6a",
+      "bytes": 3593
+    },
+    {
+      "path": "linux_scraper/merge_results.py",
+      "sha256": "a2d91893bb8880dc8c96d114d125e0deca9d64ed3d93d03b96c4ddc3e6ca59c8",
+      "bytes": 17469
+    },
+    {
+      "path": "linux_scraper/prepare_machine_db.py",
+      "sha256": "3affa15a2ef35e46131e783e654cc5a397d4f7a1d62abe15ad38ef6e8f439671",
+      "bytes": 10876
+    },
+    {
+      "path": "linux_scraper/report_generator.py",
+      "sha256": "ecb0920f1b9e85b01c4ca399a33be684f3ae5c4c5cd1cc09795e471e169d5784",
+      "bytes": 13530
+    },
+    {
+      "path": "linux_scraper/scraper.py",
+      "sha256": "7410d7987b534b7ac107f925204488f32f7d952cf8ff3000ae33e1705726f891",
+      "bytes": 115103
+    },
+    {
+      "path": "linux_scraper/stats.py",
+      "sha256": "138e969a6f1fb160dd5e70df01230adad8b0f00e66011eac6cd1e3d31eab8d55",
+      "bytes": 5199
+    },
+    {
+      "path": "linux_scraper/strategy.py",
+      "sha256": "c62bc119fb3cc89ada81c24d48f1be92279be932f932314fa85feb06dc7e68be",
+      "bytes": 2966
+    },
+    {
+      "path": "linux_scraper/worker.py",
+      "sha256": "efd0edc323d94c34be46c50c2c157919c4d8575125e7cec73ff00704cde21bc3",
+      "bytes": 8159
+    },
+    {
+      "path": "README.md",
+      "sha256": "eea650650769843d5ba71ede65d47c3d51013336e01a5bba5ef8073483b05af5",
+      "bytes": 4653
+    },
+    {
+      "path": "requirements.txt",
+      "sha256": "0409ccd04550ec2a9f8b3f8e1b7de2fbbe47c8d57bcc39f0fe961686d06c33e4",
+      "bytes": 127
+    },
+    {
+      "path": "run_continuous.py",
+      "sha256": "b6e60ea85019d1e4a6a430b150593c6d7013734b40c835d28203686aca87554f",
+      "bytes": 15294
+    },
+    {
+      "path": "run_machine1.sh",
+      "sha256": "0193d0da042cae07536f15fbd785c3fe76ba739b556a872bbd6bef125c54983c",
+      "bytes": 449
+    },
+    {
+      "path": "run_machine2.sh",
+      "sha256": "e3e4ab980093471f263eb30d6a5a45c870d4978d1d55d263d33247656de31805",
+      "bytes": 446
+    },
+    {
+      "path": "run_machine3.sh",
+      "sha256": "6363d4483acafb8ae8102f8b21ac166608bfb742a36771bef9565e19bcd83c31",
+      "bytes": 465
+    },
+    {
+      "path": "setup.bat",
+      "sha256": "2d24b2649a918f14722665790b793c834d092b08449628ea0b61d9d3078708b3",
+      "bytes": 1518
+    },
+    {
+      "path": "setup.sh",
+      "sha256": "e4b49bf3a003a575617c9457d4f8da21192055433ef4f041fedfb9be690fbe60",
+      "bytes": 4557
+    },
+    {
+      "path": "START.bat",
+      "sha256": "19a950b9d1651f76ddbb2ec4644301e8a48ac3096dc7b1c2c1887f643e585bfa",
+      "bytes": 1234
+    }
+  ]
+}

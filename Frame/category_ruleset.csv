@@ -1,0 +1,296 @@
+vocabulary,category,tier,include,food_access_type,rationale
+overture,supermarket,CORE,True,supermarket,Full-line grocery; the primary food-access anchor.
+overture,superstore,CORE,True,supercenter,Walmart/Target-class full-line grocery.
+overture,grocery_store,CORE,True,grocery,Full-line grocery.
+overture,convenience_store,CORE,True,convenience,Dominant food source in low-access areas; central to the research question.
+overture,discount_store,CORE,True,dollar,Dollar General/Family Dollar/Dollar Tree. MISSED BY THE 2026-01 PULL as a primary category.
+overture,department_store,CORE,True,supercenter,Walmart/Target carry full grocery. MISSED BY THE 2026-01 PULL as a primary category.
+overture,wholesale_store,CORE,True,warehouse_club,Costco/Sams/BJs. The Warehouse store vs Warehouse club split that lost all 9 NC Costcos.
+overture,warehouses,CORE,True,warehouse_club,Same vocabulary problem; adjudicate per store on the chain name.
+overture,food,CORE,True,grocery,Generic Overture food-retail bucket; resolve per store downstream.
+overture,farmers_market,FRESH,True,farmers_market,Fresh produce access point; excluded by the old filter and lost twice.
+overture,public_market,FRESH,True,farmers_market,Public/municipal market hall.
+overture,night_market,FRESH,True,farmers_market,Periodic market.
+overture,holiday_market,FRESH,True,farmers_market,Periodic market.
+overture,flea_market,FRESH,True,farmers_market,Many NC flea markets carry substantial produce; tag and let the analyst decide.
+overture,fruits_and_vegetables,FRESH,True,produce,Produce stand/greengrocer.
+overture,butcher_shop,FRESH,True,butcher,Fresh meat outlet.
+overture,meat_wholesaler,FRESH,True,butcher,Some sell retail; adjudicate per store.
+overture,fishmonger,FRESH,True,seafood,Fresh seafood outlet.
+overture,seafood_market,FRESH,True,seafood,Fresh seafood outlet; coastal NC relevance.
+overture,seafood_wholesaler,FRESH,True,seafood,Some sell retail; adjudicate per store.
+overture,produce_wholesaler,FRESH,True,produce,Some sell retail; adjudicate per store.
+overture,dairy_stores,FRESH,True,specialty,Retail dairy.
+overture,csa_farm,FRESH,True,farm_direct,Community-supported agriculture; direct food access.
+overture,honey_farm_shop,FRESH,True,farm_direct,On-farm retail.
+overture,urban_farm,FRESH,True,farm_direct,Often runs a stand; adjudicate per store.
+overture,agricultural_cooperatives,FRESH,True,farm_direct,Some operate retail outlets; adjudicate per store.
+overture,health_food_store,SPECIALTY,True,health_food,Natural/health grocery.
+overture,health_market,SPECIALTY,True,health_food,Natural/health grocery.
+overture,organic_grocery_store,SPECIALTY,True,health_food,Organic grocery.
+overture,ethical_grocery,SPECIALTY,True,health_food,Co-op/ethical grocery.
+overture,international_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic grocery; serves populations mainstream chains underserve.
+overture,asian_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic grocery.
+overture,indian_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic grocery.
+overture,korean_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic grocery.
+overture,japanese_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic grocery.
+overture,mexican_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic grocery; large NC Hispanic population.
+overture,russian_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic grocery.
+overture,kosher_grocery_store,SPECIALTY,True,ethnic_grocery,Ethnic/religious grocery.
+overture,imported_food,SPECIALTY,True,ethnic_grocery,Import grocery.
+overture,specialty_grocery_store,SPECIALTY,True,specialty,Specialty grocery.
+overture,specialty_foods,SPECIALTY,True,specialty,Specialty food retail.
+overture,delicatessen,SPECIALTY,True,specialty,Deli counter retail; distinguish from restaurants downstream.
+overture,cheese_shop,SPECIALTY,True,specialty,Specialty food retail.
+overture,herb_and_spice_shop,SPECIALTY,True,specialty,Specialty food retail.
+overture,frozen_foods,SPECIALTY,True,specialty,Retail frozen food.
+overture,wholesale_grocer,SPECIALTY,True,specialty,Some sell retail; adjudicate per store.
+overture,gas_station,MARGINAL,True,gas_convenience,"NC gas stations very often ARE the convenience store. Tagged, not dropped."
+overture,farm,MARGINAL,True,farm_direct,Only some run a farm stand; needs per-store adjudication.
+overture,poultry_farm,MARGINAL,True,farm_direct,Only some sell retail.
+overture,dairy_farm,MARGINAL,True,farm_direct,Only some sell retail.
+overture,fish_farm,MARGINAL,True,farm_direct,Only some sell retail.
+overture,attraction_farm,MARGINAL,True,farm_direct,Agritourism; some sell produce.
+overture,food_banks,MARGINAL,True,food_assistance,"Not retail, but a real food-access channel. Tagged for the analyst."
+overture,vitamins_and_supplements,MARGINAL,True,health_food,"Mostly supplements, not food. Tagged low priority."
+overture,bakery,MARGINAL,True,specialty,Prepared food; only sometimes a staple source.
+overture,food_court,MARGINAL,True,prepared,Prepared food.
+overture,pharmacy,MARGINAL,True,gas_convenience,CVS/Walgreens carry shelf-stable groceries in low-access areas.
+overture,shopping,MARGINAL,True,unknown,Generic Overture bucket; resolve per store.
+overture,restaurant,OUT,False,,"Prepared food service, not retail."
+overture,fast_food_restaurant,OUT,False,,Prepared food service.
+overture,seafood_restaurant,OUT,False,,Prepared food service.
+overture,mexican_restaurant,OUT,False,,Prepared food service.
+overture,pizza_restaurant,OUT,False,,Prepared food service.
+overture,comfort_food_restaurant,OUT,False,,Prepared food service.
+overture,soul_food,OUT,False,,Prepared food service.
+overture,health_food_restaurant,OUT,False,,Prepared food service.
+overture,halal_restaurant,OUT,False,,Prepared food service.
+overture,fish_and_chips_restaurant,OUT,False,,Prepared food service.
+overture,cheesesteak_restaurant,OUT,False,,Prepared food service.
+overture,live_and_raw_food_restaurant,OUT,False,,Prepared food service.
+overture,restaurant_wholesale,OUT,False,,"Trade supply, not consumer retail."
+overture,food_truck,OUT,False,,Mobile prepared food; no fixed address to scrape.
+overture,coffee_shop,OUT,False,,Prepared beverage.
+overture,food_delivery_service,OUT,False,,"Service, not a store."
+overture,pizza_delivery_service,OUT,False,,"Service, not a store."
+overture,courier_and_delivery_services,OUT,False,,Logistics.
+overture,water_delivery,OUT,False,,"Service, not a store."
+overture,food_beverage_service_distribution,OUT,False,,Trade distribution.
+overture,b2b_food_products,OUT,False,,Trade distribution.
+overture,food_and_beverage_exporter,OUT,False,,Trade.
+overture,importer_and_exporter,OUT,False,,Trade.
+overture,importers,OUT,False,,Trade.
+overture,wholesaler,OUT,False,,Generic trade wholesale.
+overture,computer_wholesaler,OUT,False,,Not food.
+overture,furniture_wholesalers,OUT,False,,Not food.
+overture,fabric_wholesaler,OUT,False,,Not food.
+overture,optical_wholesaler,OUT,False,,Not food.
+overture,fitness_equipment_wholesaler,OUT,False,,Not food.
+overture,pharmaceutical_products_wholesaler,OUT,False,,Not food.
+overture,nutritionist,OUT,False,,Professional service.
+overture,food_consultant,OUT,False,,Professional service.
+overture,food_tours,OUT,False,,Tourism.
+overture,farming_services,OUT,False,,Agricultural service.
+overture,farm_equipment_and_supply,OUT,False,,Equipment.
+overture,farming_equipment_store,OUT,False,,Equipment.
+overture,farm_equipment_repair_service,OUT,False,,Equipment service.
+overture,hunting_and_fishing_supplies,OUT,False,,Sporting goods.
+overture,fishing_charter,OUT,False,,Recreation.
+overture,fishing_club,OUT,False,,Recreation.
+overture,fire_department,OUT,False,,Keyword false positive (contains department).
+overture,police_department,OUT,False,,Keyword false positive.
+overture,health_department,OUT,False,,Keyword false positive.
+overture,department_of_motor_vehicles,OUT,False,,Keyword false positive.
+overture,department_of_social_service,OUT,False,,Keyword false positive.
+overture,marketing_agency,OUT,False,,Keyword false positive (contains market).
+overture,marketing_consultant,OUT,False,,Keyword false positive.
+overture,internet_marketing_service,OUT,False,,Keyword false positive.
+overture,telemarketing_services,OUT,False,,Keyword false positive.
+overture,hospice,OUT,False,,Keyword false positive.
+overture,pet_hospice,OUT,False,,Keyword false positive.
+overture,altering_and_remodeling_contractor,OUT,False,,Keyword false positive.
+overture,bathroom_remodeling,OUT,False,,Keyword false positive.
+overture,kitchen_remodeling,OUT,False,,Keyword false positive.
+overture,closet_remodeling,OUT,False,,Keyword false positive.
+overture,fidelity_and_surety_bonds,OUT,False,,Keyword false positive.
+overture,rental_kiosks,OUT,False,,"Redbox-style kiosk, not a store."
+overture,flowers_and_gifts_shop,OUT,False,,Not food retail.
+overture,sandwich_shop,OUT,False,,Prepared food.
+overture,video_and_video_game_rentals,OUT,False,,Not food.
+overture,clothing_store,OUT,False,,Not food.
+overture,tobacco_shop,OUT,False,,Not food.
+overture,liquor_store,OUT,False,,Alcohol only; out of scope for food access.
+overture,beer_wine_and_spirits_store,OUT,False,,Alcohol only.
+overture,thrift_store,OUT,False,,Not food.
+overture,hardware_store,OUT,False,,Not food.
+overture,pet_store,OUT,False,,Not human food.
+overture,automotive_repair,OUT,False,,Not food.
+overture,atms,OUT,False,,Not a store.
+overture,bank_credit_union,OUT,False,,Not a store.
+overture,check_cashing_service,OUT,False,,Not a store.
+overture,money_transfer_services,OUT,False,,Not a store.
+overture,mobile_phone_store,OUT,False,,Not food.
+overture,laundromat,OUT,False,,Not food.
+overture,car_wash,OUT,False,,Not food.
+overture,hotel,OUT,False,,Not food retail.
+overture,gym,OUT,False,,Not food retail.
+overture,shopping_district,OUT,False,,Not a store.
+overture,shopping_mall,MARGINAL,True,unknown,Container; resolve per store.
+overture,discount_supermarket,CORE,True,supermarket,Aldi/Lidl-class.
+overture,general_store,CORE,True,grocery,Rural general store.
+overture,bodega,CORE,True,convenience,Neighbourhood grocery.
+overture,variety_store,CORE,True,dollar,Dollar-store class.
+snap,Supermarket,CORE,True,supermarket,FNS classification: full-line grocery.
+snap,Super Store,CORE,True,supercenter,FNS classification: supercenter.
+snap,Grocery Store,CORE,True,grocery,FNS classification: grocery.
+snap,Convenience Store,CORE,True,convenience,FNS classification: convenience.
+snap,Farmers and Markets,FRESH,True,farmers_market,FNS classification: market/direct producer.
+snap,Specialty Store,SPECIALTY,True,specialty,FNS classification: specialty food retail.
+snap,Other,MARGINAL,True,unknown,FNS catch-all; resolve against Overture/OSM/Google in the same cluster.
+osm,supermarket,CORE,True,supermarket,OSM shop=supermarket.
+osm,convenience,CORE,True,convenience,OSM shop=convenience.
+osm,grocery,CORE,True,grocery,OSM shop=grocery.
+osm,general,CORE,True,grocery,OSM shop=general: rural general store.
+osm,department_store,CORE,True,supercenter,OSM shop=department_store.
+osm,variety_store,CORE,True,dollar,OSM shop=variety_store: dollar stores.
+osm,wholesale,CORE,True,warehouse_club,OSM shop=wholesale: warehouse clubs.
+osm,greengrocer,FRESH,True,produce,OSM shop=greengrocer.
+osm,butcher,FRESH,True,butcher,OSM shop=butcher.
+osm,seafood,FRESH,True,seafood,OSM shop=seafood.
+osm,farm,FRESH,True,farm_direct,"OSM shop=farm: farm shop, retail by definition of the tag."
+osm,dairy,FRESH,True,specialty,OSM shop=dairy.
+osm,marketplace,FRESH,True,farmers_market,OSM amenity=marketplace.
+osm,health_food,SPECIALTY,True,health_food,OSM shop=health_food.
+osm,deli,SPECIALTY,True,specialty,OSM shop=deli.
+osm,cheese,SPECIALTY,True,specialty,OSM shop=cheese.
+osm,spices,SPECIALTY,True,specialty,OSM shop=spices.
+osm,frozen_food,SPECIALTY,True,specialty,OSM shop=frozen_food.
+osm,food,SPECIALTY,True,specialty,OSM shop=food.
+osm,bakery,MARGINAL,True,specialty,OSM shop=bakery.
+osm,nutrition_supplements,MARGINAL,True,health_food,OSM shop=nutrition_supplements.
+google,Supermarket,CORE,True,supermarket,
+google,Grocery store,CORE,True,grocery,
+google,Convenience store,CORE,True,convenience,
+google,"Convenience store, Gas station",CORE,True,convenience,Primary category is the convenience store.
+google,Dollar store,CORE,True,dollar,
+google,Discount store,CORE,True,dollar,
+google,Variety store,CORE,True,dollar,
+google,Discount supermarket,CORE,True,supermarket,
+google,Department store,CORE,True,supercenter,
+google,General store,CORE,True,grocery,
+google,Warehouse club,CORE,True,warehouse_club,"Sam's Club, BJ's."
+google,Warehouse store,CORE,True,warehouse_club,Costco. Ruled IN here; the old sheet ruled this synonym out.
+google,Warehouse,CORE,True,warehouse_club,Same synonym family; adjudicate per store on the chain name.
+google,Store,CORE,True,grocery,Generic Google label; resolve per store.
+google,Market,CORE,True,grocery,Generic Google label; resolve per store.
+google,Food store,CORE,True,grocery,
+google,Farmers' market,FRESH,True,farmers_market,
+google,Flea market,FRESH,True,farmers_market,
+google,Produce market,FRESH,True,produce,
+google,Fruit and vegetable store,FRESH,True,produce,
+google,Produce wholesaler,FRESH,True,produce,Some sell retail.
+google,Butcher shop,FRESH,True,butcher,
+google,Butcher shop deli,FRESH,True,butcher,
+google,Meat processor,FRESH,True,butcher,Many run a retail counter.
+google,Meat products store,FRESH,True,butcher,
+google,Meat wholesaler,FRESH,True,butcher,Some sell retail.
+google,Seafood market,FRESH,True,seafood,
+google,Seafood wholesaler,FRESH,True,seafood,Some sell retail.
+google,Fish store,FRESH,True,seafood,
+google,Farm shop,FRESH,True,farm_direct,
+google,Pick your own farm produce,FRESH,True,farm_direct,
+google,Orchard,FRESH,True,farm_direct,
+google,Honey farm,FRESH,True,farm_direct,
+google,Organic farm,FRESH,True,farm_direct,
+google,Dairy farm,FRESH,True,farm_direct,Some sell retail.
+google,Egg supplier,FRESH,True,farm_direct,
+google,Health food store,SPECIALTY,True,health_food,
+google,Natural goods store,SPECIALTY,True,health_food,
+google,Gourmet grocery store,SPECIALTY,True,specialty,
+google,Mexican grocery store,SPECIALTY,True,ethnic_grocery,
+google,Asian grocery store,SPECIALTY,True,ethnic_grocery,
+google,Indian grocery store,SPECIALTY,True,ethnic_grocery,
+google,African goods store,SPECIALTY,True,ethnic_grocery,
+google,Mexican goods store,SPECIALTY,True,ethnic_grocery,
+google,Oriental goods store,SPECIALTY,True,ethnic_grocery,
+google,International grocery store,SPECIALTY,True,ethnic_grocery,
+google,Korean grocery store,SPECIALTY,True,ethnic_grocery,
+google,Japanese grocery store,SPECIALTY,True,ethnic_grocery,
+google,Chinese supermarket,SPECIALTY,True,ethnic_grocery,
+google,Tienda de alimentacion,SPECIALTY,True,ethnic_grocery,Spanish-language label Google emits for NC tiendas; unruled by the old sheet.
+google,Eastern European grocery store,SPECIALTY,True,ethnic_grocery,Unruled by the old sheet.
+google,American grocery store,SPECIALTY,True,grocery,Unruled by the old sheet.
+google,Carniceria,SPECIALTY,True,ethnic_grocery,Unruled by the old sheet.
+google,Deli,SPECIALTY,True,specialty,
+google,Delicatessen,SPECIALTY,True,specialty,
+google,Herb shop,SPECIALTY,True,specialty,
+google,Spice store,SPECIALTY,True,specialty,
+google,Cheese shop,SPECIALTY,True,specialty,
+google,Candy store,SPECIALTY,True,specialty,
+google,Wine store,SPECIALTY,True,specialty,
+google,Food products supplier,SPECIALTY,True,specialty,
+google,Food producer,SPECIALTY,True,specialty,
+google,Gas station,MARGINAL,True,gas_convenience,In rural NC the gas station is frequently the only food retail.
+google,Truck stop,MARGINAL,True,gas_convenience,
+google,Drug store,MARGINAL,True,gas_convenience,Carries shelf-stable groceries.
+google,Pharmacy,MARGINAL,True,gas_convenience,Carries shelf-stable groceries.
+google,Farm,MARGINAL,True,farm_direct,Only some run a stand.
+google,Bakery,MARGINAL,True,specialty,
+google,Vitamin & supplements store,MARGINAL,True,health_food,
+google,Sports nutrition store,MARGINAL,True,health_food,
+google,Animal feed store,MARGINAL,True,unknown,Rural general merchants sometimes carry food.
+google,Wholesaler,MARGINAL,True,unknown,Resolve per store.
+google,Distribution service,MARGINAL,True,unknown,Resolve per store.
+google,Shopping mall,MARGINAL,True,unknown,Resolve per store.
+google,Garden center,MARGINAL,True,farm_direct,Some carry produce.
+google,Plant nursery,OUT,False,,Not food retail.
+google,Christmas tree farm,OUT,False,,Not food retail.
+google,Liquor store,OUT,False,,Alcohol only; out of scope for food access.
+google,Tobacco shop,OUT,False,,Not food.
+google,Smoke shop,OUT,False,,Not food.
+google,Vaporizer store,OUT,False,,Not food.
+google,Cannabis store,OUT,False,,Not food.
+google,Restaurant,OUT,False,,Prepared food.
+google,restaurants,OUT,False,,Prepared food.
+google,Fast food restaurant,OUT,False,,Prepared food.
+google,Mexican restaurant,OUT,False,,Prepared food.
+google,Seafood restaurant,OUT,False,,Prepared food.
+google,cafes,OUT,False,,Prepared food.
+google,Ice cream shop,OUT,False,,Prepared food.
+google,Juice shop,OUT,False,,Prepared food.
+google,Donut shop,OUT,False,,Prepared food.
+google,Popcorn store,OUT,False,,Confection only.
+google,Coffee shop,OUT,False,,Prepared beverage.
+google,ATM,OUT,False,,Not a store.
+google,Bank,OUT,False,,Not a store.
+google,attractions,OUT,False,,Not food retail.
+google,Event venue,OUT,False,,Not food retail.
+google,Wedding venue,OUT,False,,Not food retail.
+google,Corporate office,OUT,False,,Not a store.
+google,Non-profit organization,OUT,False,,Not retail.
+google,Manufacturer,OUT,False,,Not retail.
+google,Food manufacturer,OUT,False,,Not retail.
+google,Agricultural production,OUT,False,,Not retail.
+google,Hardware store,OUT,False,,Not food.
+google,Furniture store,OUT,False,,Not food.
+google,Antique store,OUT,False,,Not food.
+google,Clothing store,OUT,False,,Not food.
+google,Gift shop,OUT,False,,Not food.
+google,Auto repair shop,OUT,False,,Not food.
+google,Nutritionist,OUT,False,,Professional service.
+google,Wellness center,OUT,False,,Not food retail.
+google,Bottled water supplier,OUT,False,,Not food.
+google,Ice supplier,OUT,False,,Not food.
+google,Fuel supplier,OUT,False,,"Fuel distribution, not a retail store."
+google,Garden,OUT,False,,Not food retail.
+google,Beer store,OUT,False,,Alcohol only.
+google,Wholesale bakery,OUT,False,,Trade supply.
+google,Taco restaurant,OUT,False,,Prepared food.
+google,coffee shops,OUT,False,,Prepared beverage.
+google,Medical clinic,OUT,False,,Not food retail.
+google,Park,OUT,False,,Not food retail.
+google,Tienda de productos mexicanos,SPECIALTY,True,ethnic_grocery,Spanish-language Google label for a Mexican goods store.
+google,Supermercado,CORE,True,supermarket,Spanish-language Google label.
+google,Fruteria,FRESH,True,produce,Spanish-language Google label for a produce store.
+google,Panaderia,MARGINAL,True,specialty,Spanish-language Google label for a bakery.

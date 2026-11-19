@@ -1,0 +1,33 @@
+{
+  "artifact": "Step_5_master_reviews_FROZEN_2026-10-11.db",
+  "sha256": "f9232b5f57f6e7d118c75a6475a5a73044cc8f8fea21c23ac7d8ffac925b0f82",
+  "bytes": 609484800,
+  "frozen_at": "2026-10-11T08:26:18",
+  "stores": 4447,
+  "reviews": 1811845,
+  "reviews_with_text": 933359,
+  "stores_by_status": {
+    "complete": 4447
+  },
+  "sum_targets": 1816964,
+  "stores_ruled_complete": 1483,
+  "stores_at_1500_cap": 281,
+  "validator": "r00_validate.py --fail-on HIGH exits 0 (worst severity MED)",
+  "side_databases": {
+    "Step_5_out_of_scope.db": {
+      "sha256": "37b0fe1e1a322eab79eb9a1510ac4a4ee04a524da22608c6bd4f4c95c2cd035d",
+      "stores": 4736,
+      "reviews": 105892
+    },
+    "Step_5_closed_stores.db": {
+      "sha256": "af2207db7558dcb61d64d368ae222a1275dce7a7d0fd1900c8fc77bb83fc92de",
+      "stores": 62,
+      "reviews": 7103
+    },
+    "Step_5_excluded_stores.db": {
+      "sha256": "9147cf87a4eacd6c824a5219fbcdf21cc51e4b126e9f441bfd5a493d0167f2da",
+      "stores": 221,
+      "reviews": 163
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "USDA SNAP": {
+    "total": 8883,
+    "KEPT": 7906,
+    "OUT_OF_SCOPE_FORMAT": 973,
+    "GEOMATCH_DUPLICATE": 4
+  },
+  "Overture Aug": {
+    "total": 32286,
+    "KEPT": 14368,
+    "UNCORROBORATED": 8976,
+    "OUT_OF_SCOPE_FORMAT": 8791,
+    "GEOMATCH_DUPLICATE": 151
+  },
+  "OpenStreetMap": {
+    "total": 6826,
+    "KEPT": 5643,
+    "UNCORROBORATED": 924,
+    "OUT_OF_SCOPE_FORMAT": 232,
+    "GEOMATCH_DUPLICATE": 27
+  },
+  "Old master": {
+    "total": 5190,
+    "KEPT": 4952,
+    "UNCORROBORATED": 186,
+    "GEOMATCH_DUPLICATE": 44,
+    "OUT_OF_SCOPE_FORMAT": 8
+  },
+  "Exclusion audit": {
+    "total": 6922,
+    "KEPT": 5594,
+    "OUT_OF_SCOPE_FORMAT": 1236,
+    "GEOMATCH_DUPLICATE": 92
+  },
+  "Overture Jan": {
+    "total": 14958,
+    "KEPT": 12933,
+    "OUT_OF_SCOPE_FORMAT": 1575,
+    "UNCORROBORATED": 292,
+    "GEOMATCH_DUPLICATE": 158
+  }
+}

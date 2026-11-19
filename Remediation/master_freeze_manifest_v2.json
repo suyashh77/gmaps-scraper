@@ -1,0 +1,44 @@
+{
+  "artifact": "Step_5_master_reviews_FROZEN_2026-10-24.db",
+  "sha256": "7a8472b7d91fc92e0b15b5c4576f7e9ed75310cdbb45610c7023e0e813d28785",
+  "bytes": 641601536,
+  "frozen_at": "2026-10-24T10:03:33",
+  "supersedes": "master_freeze_manifest.json (v1, 2026-10-11)",
+  "stores": 4442,
+  "reviews": 1941538,
+  "reviews_with_text": 977398,
+  "quarantined_reviews": 29321,
+  "stores_by_status": {
+    "complete": 4400,
+    "incomplete": 42
+  },
+  "sum_targets": 2207804,
+  "stores_at_1500_cap": 109,
+  "batches_merged_since_v1": [
+    "dewey27",
+    "dewey28",
+    "dewey30a",
+    "dewey30b"
+  ],
+  "validator": "r00 --fail-on HIGH exits 1: 40 incomplete stores (42 by the rule, all targets 101-500, 955 reviews short; scraping closed) and 1 class-B flag that is a stale 1,500 target, not a double scrape (store 8259, 0 duplicate groups)",
+  "side_databases": {
+    "Step_5_out_of_scope.db": {
+      "sha256": "37b0fe1e1a322eab79eb9a1510ac4a4ee04a524da22608c6bd4f4c95c2cd035d",
+      "stores": 4736,
+      "reviews": 105892
+    },
+    "Step_5_closed_stores.db": {
+      "sha256": "4c2a303b9c653287d626b8539616c95bd9cf5ea3e05bb336a6941902da60628d",
+      "stores": 67,
+      "reviews": 7836
+    },
+    "Step_5_excluded_stores.db": {
+      "sha256": "9147cf87a4eacd6c824a5219fbcdf21cc51e4b126e9f441bfd5a493d0167f2da",
+      "stores": 221,
+      "reviews": 163
+    }
+  },
+  "sum_targets_capped_1500": 1821007,
+  "fill_vs_capped_targets": 0.9964,
+  "completion_rule": "owner 2026-10-24: target capped at 1,500; complete if missing <=10 (target<=100), <=20 (>100), <=50 (>500), <=100 (>1,500); r13.TOLERANCE_TIERS, applied by r15"
+}

@@ -21,6 +21,49 @@ from .config import load_config
 from .database import DatabaseManager, make_db, get_or_create_machine_id
 
 
+
+AUTH_PREFIX = "google_auth"
+AUTH_SUFFIX = ".json"
+
+
+def _auth_files_in(folder: str) -> list[str]:
+    """Sorted google_auth_*.json paths in one folder; banned sessions skipped."""
+    if not os.path.isdir(folder):
+        return []
+    return [
+        os.path.abspath(os.path.join(folder, name))
+        for name in sorted(os.listdir(folder))
+        if name.startswith(AUTH_PREFIX) and name.endswith(AUTH_SUFFIX)
+    ]
+
+
+def discover_auth_files(script_dir: str, explicit: str | None = None) -> tuple[str, ...]:
+    """Locate Google session files without requiring a copy next to the package.
+
+    Search order: the explicit path if it exists, then `script_dir` itself, its
+    `auth/` subfolder (collection-kit layout), and `../Auth/` (repository
+    layout). Each file is listed once even when two of those spellings resolve
+    to the same folder on a case-insensitive filesystem.
+    """
+    candidates: list[str] = []
+    if explicit and os.path.exists(explicit):
+        candidates.append(os.path.abspath(explicit))
+    for folder in (
+        script_dir,
+        os.path.join(script_dir, "auth"),
+        os.path.join(os.path.dirname(script_dir), "Auth"),
+    ):
+        candidates.extend(_auth_files_in(folder))
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for path in candidates:
+        key = os.path.normcase(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return tuple(unique)
+
 def _log(msg: str) -> None:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] {msg}", flush=True)
@@ -83,21 +126,9 @@ def run_scraper(
     config = load_config()
 
     # ── Auth ──────────────────────────────────────────────────────────────
-    valid_auth = []
-
-    # If a specific auth file was passed, try it first
-    if auth_path:
-        if os.path.exists(auth_path):
-            valid_auth.append(os.path.abspath(auth_path))
-        else:
-            _log(f"WARNING: Specified auth file not found: {auth_path}")
-
-    # Auto-discover all google_auth_*.json in the deploy directory
-    for fname in sorted(os.listdir(script_dir)):
-        if fname.startswith("google_auth") and fname.endswith(".json"):
-            p = os.path.join(script_dir, fname)
-            if p not in valid_auth:
-                valid_auth.append(os.path.abspath(p))
+    if auth_path and not os.path.exists(auth_path):
+        _log(f"WARNING: Specified auth file not found: {auth_path}")
+    valid_auth = list(discover_auth_files(script_dir, explicit=auth_path))
 
     if valid_auth:
         _log(f"Auth accounts loaded: {[os.path.basename(f) for f in valid_auth]}")
